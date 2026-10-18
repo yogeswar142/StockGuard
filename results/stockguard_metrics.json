@@ -1,0 +1,44 @@
+{
+  "model": "StockGuard_Core",
+  "eval_start_date": "2026-01-20",
+  "total_alerts": 9422,
+  "total_true_positives": 417,
+  "raw_precision_at_20": 0.0443,
+  "norm_precision_at_20": 0.0491,
+  "total_eval_episodes": 474,
+  "episodes_caught": 417,
+  "episode_recall_overall": 0.8797,
+  "episode_recall_3d": 0.4641,
+  "episode_recall_7d": 0.7236,
+  "episode_recall_14d": 0.8122,
+  "mean_time_to_detect_days": 5.47,
+  "velocity_precision": {
+    "Fast": {
+      "alerts": 187,
+      "true_positives": 43,
+      "precision": 0.2299
+    },
+    "Medium": {
+      "alerts": 3476,
+      "true_positives": 153,
+      "precision": 0.044
+    },
+    "Slow": {
+      "alerts": 5759,
+      "true_positives": 221,
+      "precision": 0.0384
+    }
+  },
+  "fp_breakdown": {
+    "total_false_positives": 9005,
+    "slow_mover_zeros": 7270,
+    "slow_mover_share_pct": 80.7,
+    "demand_shocks": 0,
+    "demand_shock_share_pct": 0.0,
+    "post_promo_lulls": 875,
+    "post_promo_share_pct": 9.7,
+    "misplaced_items": 94,
+    "misplaced_share_pct": 1.0,
+    "other_noise": 766
+  }
+}

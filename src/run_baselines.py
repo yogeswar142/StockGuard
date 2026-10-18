@@ -3,8 +3,15 @@ src/run_baselines.py - Runs and evaluates Baseline A and Baseline B on the synth
 """
 
 import os
+import sys
 import json
 import pandas as pd
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 from src.baseline_models import FixedNZeroDaysBaseline, StreakLengthBaseline, run_baseline_simulation
 from src.evaluation_metrics import compute_metrics
