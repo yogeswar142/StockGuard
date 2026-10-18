@@ -60,10 +60,29 @@
     - Lowering threshold for fast/medium movers does NOT improve recall@7d (fast movers already cross 0.50 within 3 days).
     - Lowering medium threshold allowed more false positives into the top-20 budget, dropping precision by 0.5-0.7 percentage points without recall gain.
     - Result: Uniform threshold (0.35) combined with Expected Value ranking is empirically optimal.
-- [Decision - Step 4] Value & Benchmark Suite:
-  - Implemented budget sweeps (1, 3, 5, 10, 20 checks/store-day) across StockGuard, Baseline A, Baseline A Matched-Volume, Baseline B, Random, and Oracle.
-  - Value-Weighted Recall: evaluates share of total economic margin-at-risk caught (`price * margin * lambda * duration`).
-  - Annual Rupee Calculation:
-    $$\text{Net Annual Recovery} = \text{Caught Episodes} \times \bar{M}_{\text{daily}} \times \bar{D}_{\text{saved}} \times \frac{365}{D_{\text{eval}}} \times 0.60 - \text{Audit Cost}$$
-    accounting for 60% truly lost demand and ₹5 audit cost per check.
+- [Decision - Step 4 Review]:
+  - **Exact Per-Episode Rupee Model:**
+    Replaced fixed 21-day duration assumption with exact ground-truth episode arithmetic:
+    $$\text{days\_saved}_e = \max(0, \text{actual\_duration}_e - (\text{days\_to\_alert}_e + 1))$$
+    $$\text{margin\_saved}_e = \text{days\_saved}_e \times (\text{unit\_price} \times \text{gross\_margin\_pct} \times \text{base\_demand\_rate})$$
+    Total evaluated recovery strictly reported for the 10-store × 150-SKU pilot (~₹508K net annual recovery).
+  - **Probability Calibration (Platt Scaling):**
+    Raw Bayesian posteriors yielded high Brier score (~0.36) due to base prevalence disconnect. Fitted Platt scaling on calibration-slice logit posteriors, reducing Brier score to 0.0477 (matching base-rate ~0.0458). Alerts now output empirical probabilities (5%–25%) rather than misleading 99.9% claims.
+  - **Confusers & Residual Verification:**
+    - Demand shocks: Extended seasonal drop window in generator to cover Year 2 (`burn_in + 380` to `burn_in + 480`) so demand shocks appear in test period.
+    - 766 residual count resolved: Unclassified alerts were delisted/discontinued SKUs (`is_delisted == 1`), which sit with system stock > 0 and 0 sales indefinitely. Added explicit `delisted_ghost_inventory` class and relabeled misplaced items as `genuine_shelf_void_misplaced`.
+  - **Normalised Precision Formula:**
+    $$\text{Precision@20}_{\text{norm}}(s, t) = \frac{\text{True Positives in Top 20}(s, t)}{\min(20, \text{Active True Phantoms}(s, t))}$$
+    Added Oracle (100.0%) and Random Selection (~4.4%) rows to headline benchmark table.
+  - **Robustness Grid:**
+    Automated 5 stress scenarios (Baseline, Seed 101, Noisier Demand $\alpha=0.60$, Heavier Promos 2x, Longer Slow Tail 75% slow).
+- [Decision - Step 5 Implementation]:
+  - **Interactive Streamlit Dashboard (`app.py`):**
+    - Store Operations Desk: Daily top-20 list strictly capped at ≤ 20 audits/day, sorted by Expected Value of an audit ($EV = P \times \text{Daily Margin} \times \text{Days Saved} - \text{Cost}$).
+    - Visual Proof: Interactive dual-panel Plotly chart comparing recorded sales (bars) vs flatlined system stock (line) vs baseline demand ($\lambda$) with shaded zero streak, paired with peer-store average demand trajectory.
+    - Closed-Loop Shelf Audit Simulation: One-tap action buttons ("Shelf Empty", "Found Stock", "Wrong Place", "Discontinued") that update session state, calculate recovered rupees, and engage 7-day cooldowns for false alarms.
+    - Executive Benchmarking & ROI Simulator: Side-by-side benchmark table, budget sweep curves (1 to 20 checks/day), Platt reliability diagram, confuser false-positive breakdown, and dynamic chain-wide ROI calculator.
+    - Automated Testing: Added `tests/test_dashboard.py` leveraging `streamlit.testing.v1.AppTest` for headless UI verification. Full test suite: 10/10 passed in 7.5s.
+
+
 

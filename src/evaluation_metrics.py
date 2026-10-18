@@ -152,7 +152,7 @@ def compute_metrics(
     if total_fp > 0:
         fp_merged = pd.merge(
             fp_alerts,
-            eval_truth[["date", "store_id", "sku_id", "is_demand_shock", "is_post_promo_lull", "is_slow_mover_zero", "is_misplaced"]],
+            eval_truth[["date", "store_id", "sku_id", "is_demand_shock", "is_post_promo_lull", "is_slow_mover_zero", "is_misplaced", "is_delisted"]],
             on=["date", "store_id", "sku_id"],
             how="left"
         )
@@ -160,7 +160,17 @@ def compute_metrics(
         fp_shock = int(fp_merged["is_demand_shock"].sum())
         fp_lull = int(fp_merged["is_post_promo_lull"].sum())
         fp_misplaced = int(fp_merged["is_misplaced"].sum())
-        fp_other = max(0, total_fp - fp_slow - fp_shock - fp_lull - fp_misplaced)
+        fp_delisted = int(fp_merged["is_delisted"].sum()) if "is_delisted" in fp_merged.columns else 0
+        
+        # Avoid negative residual if flags overlap on same row
+        classified = (
+            (fp_merged["is_slow_mover_zero"] == 1) |
+            (fp_merged["is_demand_shock"] == 1) |
+            (fp_merged["is_post_promo_lull"] == 1) |
+            (fp_merged["is_misplaced"] == 1) |
+            (fp_merged["is_delisted"] == 1)
+        ).sum()
+        fp_other = max(0, total_fp - int(classified))
         
         fp_breakdown = {
             "total_false_positives": total_fp,
@@ -170,8 +180,10 @@ def compute_metrics(
             "demand_shock_share_pct": round(fp_shock / total_fp * 100, 1),
             "post_promo_lulls": fp_lull,
             "post_promo_share_pct": round(fp_lull / total_fp * 100, 1),
-            "misplaced_items": fp_misplaced,
+            "genuine_shelf_void_misplaced": fp_misplaced,
             "misplaced_share_pct": round(fp_misplaced / total_fp * 100, 1),
+            "delisted_ghost_inventory": fp_delisted,
+            "delisted_share_pct": round(fp_delisted / total_fp * 100, 1),
             "other_noise": fp_other,
         }
 

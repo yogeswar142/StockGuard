@@ -255,9 +255,11 @@ def generate_synthetic_data(
     delisted_candidates = df_sku.sample(n=max(1, int(n_skus * 0.02)), random_state=seed+1)["sku_id"].tolist()
     delisted_start_day = burn_in_days + int(n_days * 0.55)
     
-    # Demand shock timing: mid-year seasonal drop (e.g. days 180-260)
-    shock_start_day = burn_in_days + 120
-    shock_end_day = burn_in_days + 240
+    # Demand shock timing: seasonal drops in both Year 1 (cal) and Year 2 (eval)
+    shock_windows = [
+        (burn_in_days + 120, burn_in_days + 220),  # Year 1 (cal period)
+        (burn_in_days + 380, burn_in_days + 480),  # Year 2 (eval period)
+    ]
     
     pos_records = []
     ground_truth_records = []
@@ -368,7 +370,7 @@ def generate_synthetic_data(
                 is_on_promo = 1 if promo_lift > 1.0 else 0
                 
                 is_post_promo_lull = 1 if ((s_id, sku_id, day_idx) in promo_end_dates and not is_on_promo) else 0
-                is_demand_shock = 1 if (sku_id in demand_shock_skus and shock_start_day <= day_idx <= shock_end_day) else 0
+                is_demand_shock = 1 if (sku_id in demand_shock_skus and any(w_start <= day_idx <= w_end for w_start, w_end in shock_windows)) else 0
                 
                 # Demand multipliers for confusers
                 confuser_mult = 1.0
