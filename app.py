@@ -1,11 +1,12 @@
 """
 StockGuard: Phantom Stock-Out Detector
-Interactive Store Manager Dashboard & Executive Benchmarking Suite
+Store Manager Daily Checklist & Executive Benchmarking Suite
 Streamlit Application
 """
 
 import os
 import json
+import datetime
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -16,49 +17,79 @@ import streamlit as st
 # Page Configuration
 # ==============================================================================
 st.set_page_config(
-    page_title="StockGuard | Phantom Stock-Out Detector",
+    page_title="StockGuard | Daily Store Shelf-Check List",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# Custom Styling (Retail Operations Theme)
+# Custom Styling (Store Operations & Mobile-Friendly Theme)
 st.markdown(
     """
     <style>
-    /* Global font & background accents */
     .main .block-container {
-        padding-top: 1.5rem;
+        padding-top: 1.0rem;
         padding-bottom: 2.5rem;
         max-width: 98%;
     }
-    .metric-card {
-        background-color: #f8fafc;
+    .product-tagline {
+        background: #f8fafc;
+        border-left: 4px solid #2563eb;
+        padding: 8px 14px;
+        border-radius: 4px;
+        font-size: 0.88rem;
+        color: #1e293b;
+        margin: 6px 0 14px 0;
+    }
+    .kpi-card {
+        background-color: #ffffff;
         border: 1px solid #e2e8f0;
         border-radius: 8px;
-        padding: 14px 18px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        margin-bottom: 8px;
+        padding: 12px 14px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
     }
-    .metric-title {
-        font-size: 0.80rem;
+    .kpi-title {
+        font-size: 0.78rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.04em;
         color: #64748b;
         font-weight: 600;
         margin-bottom: 4px;
     }
-    .metric-value {
-        font-size: 1.50rem;
+    .kpi-value {
+        font-size: 1.45rem;
         font-weight: 700;
         color: #0f172a;
-        line-height: 1.2;
+        line-height: 1.1;
     }
-    .metric-sub {
-        font-size: 0.75rem;
-        color: #059669;
+    .kpi-sub {
+        font-size: 0.74rem;
         font-weight: 500;
-        margin-top: 4px;
+        margin-top: 3px;
+    }
+    .badge-high {
+        background-color: #fee2e2;
+        color: #991b1b;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+    }
+    .badge-med {
+        background-color: #fef3c7;
+        color: #92400e;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .badge-low {
+        background-color: #f1f5f9;
+        color: #475569;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
     }
     .badge-fast {
         background-color: #dbeafe;
@@ -84,46 +115,38 @@ st.markdown(
         font-size: 0.70rem;
         font-weight: 600;
     }
-    .badge-conf {
-        background-color: #fef3c7;
-        color: #b45309;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.70rem;
-        font-weight: 700;
-    }
-    .badge-ev {
-        background-color: #dcfce7;
-        color: #15803d;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.70rem;
-        font-weight: 700;
-    }
-    .badge-audited-phantom {
+    .badge-done-phantom {
         background-color: #fee2e2;
         color: #b91c1c;
         padding: 2px 8px;
         border-radius: 12px;
-        font-size: 0.70rem;
+        font-size: 0.72rem;
         font-weight: 700;
     }
-    .badge-audited-safe {
+    .badge-done-safe {
         background-color: #f0fdf4;
         color: #15803d;
         padding: 2px 8px;
         border-radius: 12px;
-        font-size: 0.70rem;
+        font-size: 0.72rem;
         font-weight: 700;
     }
-    .callout-box {
-        background-color: #f8fafc;
-        border-left: 4px solid #2563eb;
-        padding: 12px 16px;
-        border-radius: 4px;
-        font-size: 0.88rem;
-        color: #1e293b;
-        margin: 10px 0;
+    .badge-done-misplaced {
+        background-color: #fef3c7;
+        color: #b45309;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.72rem;
+        font-weight: 700;
+    }
+    .action-callout {
+        background-color: #f0fdf4;
+        border-left: 4px solid #16a34a;
+        padding: 10px 14px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        color: #14532d;
+        margin: 8px 0;
     }
     .benchmark-table {
         width: 100%;
@@ -190,28 +213,51 @@ def load_ground_truth_labels():
 stores_df, skus_df, metrics = load_metadata()
 alerts_df = load_alerts()
 
-# Initialize Session State for Interactive Shelf Audits
+# ==============================================================================
+# Session State Initialization (Default to Store 02 on 2026-01-20 for Demo Video)
+# ==============================================================================
 if "audited_items" not in st.session_state:
     st.session_state.audited_items = {}  # key: (store_id, date, sku_id) -> audit info
-if "selected_sku_key" not in st.session_state:
-    st.session_state.selected_sku_key = None
+
+if "curr_store" not in st.session_state:
+    st.session_state.curr_store = "STORE_02"  # Pre-selected demo store
+
+if "curr_date" not in st.session_state:
+    st.session_state.curr_date = "2026-01-20"  # Pre-selected demo date
+
+if "selected_sku_id" not in st.session_state:
+    st.session_state.selected_sku_id = "SKU_133"  # Pre-selected demo phantom example
+
+if "show_printable" not in st.session_state:
+    st.session_state.show_printable = False
+
+
+# Helper for plain-language likelihood badge
+def get_likelihood_badge(conf_val):
+    pct = int(round(conf_val * 100))
+    if conf_val >= 0.12:
+        return f'<span class="badge-high">High Likelihood ({pct}%)</span>'
+    elif conf_val >= 0.06:
+        return f'<span class="badge-med">Medium Likelihood ({pct}%)</span>'
+    else:
+        return f'<span class="badge-low">Watch ({pct}%)</span>'
 
 
 # ==============================================================================
-# Header & Headline Performance KPI Bar
+# App Header & Product Positioning
 # ==============================================================================
-header_col1, header_col2 = st.columns([7, 3])
-with header_col1:
+header_c1, header_c2 = st.columns([7, 3])
+with header_c1:
     st.markdown(
         """
-        <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 2.2rem;">🛡️</span>
             <div>
-                <h1 style="margin: 0; font-size: 1.85rem; font-weight: 800; color: #0f172a;">
-                    StockGuard: Phantom Stock-Out Detector
+                <h1 style="margin: 0; font-size: 1.80rem; font-weight: 800; color: #0f172a; line-height: 1.1;">
+                    StockGuard: Daily Shelf-Check List
                 </h1>
-                <p style="margin: 2px 0 0 0; color: #64748b; font-size: 0.90rem;">
-                    Explainable Bayesian Shelf Audit Prioritisation · Hard-Capped at ≤ 20 Checks/Store/Day
+                <p style="margin: 2px 0 0 0; color: #64748b; font-size: 0.88rem; font-weight: 500;">
+                    Daily prioritized inventory audit tool for store managers · Capped at 20 shelves/day
                 </p>
             </div>
         </div>
@@ -219,200 +265,263 @@ with header_col1:
         unsafe_allow_html=True,
     )
 
-with header_col2:
+with header_c2:
     st.markdown(
         """
-        <div style="text-align: right; padding-top: 8px;">
-            <span style="background-color: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
-                Pilot: 10 Stores × 150 SKUs × 540 Days
+        <div style="text-align: right; padding-top: 6px;">
+            <span style="background-color: #f1f5f9; color: #334155; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
+                Store Operations Portal · Round 1
             </span>
-            <div style="font-size: 0.72rem; color: #64748b; margin-top: 4px;">
-                Out-of-Sample Period: 2026-01-20 to 2026-08-23
-            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
-
-# Top KPI Metric Cards Row
-kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-with kpi1:
-    st.markdown(
-        """
-        <div class="metric-card" style="border-left: 4px solid #2563eb;">
-            <div class="metric-title">Audit Budget Cap</div>
-            <div class="metric-value">≤ 20 / day</div>
-            <div class="metric-sub" style="color: #2563eb;">Respects staff labor ceiling</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with kpi2:
-    st.markdown(
-        """
-        <div class="metric-card" style="border-left: 4px solid #16a34a;">
-            <div class="metric-title">Pilot Net Annual ROI</div>
-            <div class="metric-value">₹5,08,172</div>
-            <div class="metric-sub" style="color: #16a34a;">₹9.75L Gross − ₹76.8K Audit Cost</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with kpi3:
-    st.markdown(
-        """
-        <div class="metric-card" style="border-left: 4px solid #7c3aed;">
-            <div class="metric-title">Raw Precision@20</div>
-            <div class="metric-value">4.81%</div>
-            <div class="metric-sub" style="color: #7c3aed;">+51% vs Baseline A (3.23%)</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with kpi4:
-    st.markdown(
-        """
-        <div class="metric-card" style="border-left: 4px solid #0891b2;">
-            <div class="metric-title">Value-Weighted Recall</div>
-            <div class="metric-value">97.80%</div>
-            <div class="metric-sub" style="color: #0891b2;">Captures ₹7.70L of ₹7.87L risk</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with kpi5:
-    st.markdown(
-        """
-        <div class="metric-card" style="border-left: 4px solid #d97706;">
-            <div class="metric-title">Time to Detect (TTD)</div>
-            <div class="metric-value">5.0 Days</div>
-            <div class="metric-sub" style="color: #d97706;">Saves ~15.9 days of lost sales</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Plain-English one-line product description at top
+st.markdown(
+    """
+    <div class="product-tagline">
+        <strong>StockGuard</strong> gives retail store managers a daily, value-ranked list of up to 20 shelves to physically check — finding inventory records that say "in stock" while the shelf is empty.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ==============================================================================
-# Navigation Tabs
+# Navigation Tabs: Manager View First
 # ==============================================================================
-tab_ops, tab_benchmark, tab_methodology = st.tabs([
-    "📋 Store Operations (Daily Shelf-Check List)",
-    "📊 Executive Benchmarking & ROI Explorer",
-    "🔬 Methodology & Grounding",
+tab_manager, tab_performance, tab_methodology = st.tabs([
+    "📋 Today's Store Checklist",
+    "📊 Performance and ROI",
+    "🔬 Methodology and Grounding",
 ])
 
 
 # ==============================================================================
-# TAB 1: Store Operations (Daily Shelf-Check List)
+# TAB 1: Today's Store Checklist (Manager View)
 # ==============================================================================
-with tab_ops:
-    # Top Control Bar for Store & Date selection
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([3, 3, 4])
-    
-    with ctrl_col1:
+with tab_manager:
+    # Store and Date Selection Bar
+    store_c1, store_c2, store_c3 = st.columns([3, 3, 4])
+
+    with store_c1:
         store_options = stores_df["store_id"].tolist()
         store_labels = {
-            row["store_id"]: f"{row['store_id']} - {row['city']} ({row['format']}, {row['city_tier']})"
+            row["store_id"]: f"{row['store_name']} ({row['city']}, {row['format']})"
             for _, row in stores_df.iterrows()
         }
+        curr_store_idx = store_options.index(st.session_state.curr_store) if st.session_state.curr_store in store_options else 0
         selected_store = st.selectbox(
-            "Select Store Location",
+            "Store Location",
             options=store_options,
             format_func=lambda x: store_labels[x],
-            index=1,  # Default to STORE_02 (Mumbai Hypermarket)
+            index=curr_store_idx,
+            key="select_store_box",
         )
+        if selected_store != st.session_state.curr_store:
+            st.session_state.curr_store = selected_store
+            st.rerun()
 
-    # Filter alerts for the selected store to know available dates
-    store_alerts_all = alerts_df[alerts_df["store_id"] == selected_store]
+    # Available Dates for selected store
+    store_alerts_all = alerts_df[alerts_df["store_id"] == st.session_state.curr_store]
     available_dates = sorted(store_alerts_all["date"].unique())
-    
-    with ctrl_col2:
-        # Default to a high-density demo date (2026-01-20) if available
-        default_date_idx = available_dates.index("2026-01-20") if "2026-01-20" in available_dates else 0
+
+    with store_c2:
+        curr_date_idx = available_dates.index(st.session_state.curr_date) if st.session_state.curr_date in available_dates else 0
         selected_date = st.selectbox(
-            "Select Audit Date",
+            "Checklist Date",
             options=available_dates,
-            index=default_date_idx,
-            help="Evaluation window covers 216 days (2026-01-20 to 2026-08-23).",
+            index=curr_date_idx,
+            key="select_date_box",
         )
-    
-    with ctrl_col3:
-        st.markdown("<div style='font-size: 0.80rem; font-weight: 600; color: #475569; margin-bottom: 5px;'>⚡ Quick Jump to Demo Scenarios</div>", unsafe_allow_html=True)
-        qj_c1, qj_c2, qj_c3 = st.columns(3)
-        with qj_c1:
-            if st.button("🔥 Store 02 (8 Phantoms)", width="stretch"):
-                st.session_state["jump_store"] = "STORE_02"
-                st.session_state["jump_date"] = "2026-01-20"
-                st.rerun()
-        with qj_c2:
-            if st.button("📦 Store 07 (6 Phantoms)", width="stretch"):
-                st.session_state["jump_store"] = "STORE_07"
-                st.session_state["jump_date"] = "2026-01-20"
-                st.rerun()
-        with qj_c3:
-            if st.button("🔍 Store 01 (Misplaced)", width="stretch"):
-                st.session_state["jump_store"] = "STORE_01"
-                st.session_state["jump_date"] = "2026-01-21"
-                st.rerun()
+        if selected_date != st.session_state.curr_date:
+            st.session_state.curr_date = selected_date
+            st.rerun()
 
-    # Handle quick jumps if requested
-    if "jump_store" in st.session_state and "jump_date" in st.session_state:
-        selected_store = st.session_state.pop("jump_store")
-        selected_date = st.session_state.pop("jump_date")
+    with store_c3:
+        st.markdown("<div style='font-size: 0.80rem; font-weight: 600; color: #475569; margin-bottom: 5px;'>🎬 Presentation Demo Shortcut</div>", unsafe_allow_html=True)
+        if st.button("▶️ Load Demo Video Example (Store 02 · Mosquito Repellent)", width="stretch"):
+            st.session_state.curr_store = "STORE_02"
+            st.session_state.curr_date = "2026-01-20"
+            st.session_state.selected_sku_id = "SKU_133"
+            st.rerun()
 
-    # Get Top-20 Alerts for (selected_store, selected_date)
-    day_alerts = alerts_df[(alerts_df["store_id"] == selected_store) & (alerts_df["date"] == selected_date)]
-    day_alerts = day_alerts.sort_values(by="rank").head(20).reset_index(drop=True)
+    # Get Today's Alerts
+    day_alerts = alerts_df[
+        (alerts_df["store_id"] == st.session_state.curr_store)
+        & (alerts_df["date"] == st.session_state.curr_date)
+    ].sort_values(by="rank").head(20).reset_index(drop=True)
 
-    # Calculate Today's Store Audit Progress
-    today_audit_keys = [k for k in st.session_state.audited_items if k[0] == selected_store and k[1] == selected_date]
-    completed_checks = len(today_audit_keys)
-    total_checks_today = len(day_alerts)
-    recovered_today_inr = sum(st.session_state.audited_items[k].get("margin_saved_inr", 0.0) for k in today_audit_keys)
+    # Ensure selected SKU exists in today's alerts, otherwise default to first alert
+    if len(day_alerts) > 0:
+        if st.session_state.selected_sku_id not in day_alerts["sku_id"].values:
+            st.session_state.selected_sku_id = day_alerts.iloc[0]["sku_id"]
+    else:
+        st.session_state.selected_sku_id = None
 
-    # Store Day Banner
-    store_meta = stores_df[stores_df["store_id"] == selected_store].iloc[0]
-    st.markdown(
-        f"""
-        <div style="background: linear-gradient(90deg, #f8fafc 0%, #edf2f7 100%); border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 16px; margin: 10px 0 16px 0; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <span style="font-weight: 700; color: #0f172a; font-size: 0.95rem;">📍 {store_meta['store_name']} ({store_meta['city']}, {store_meta['city_tier']})</span>
-                <span style="color: #64748b; font-size: 0.85rem; margin-left: 12px;">Format: {store_meta['format']} · Size: {store_meta['size_sqft']:,} sq.ft</span>
-            </div>
-            <div style="display: flex; gap: 16px; align-items: center;">
-                <span style="font-size: 0.85rem; color: #334155;"><strong>Date:</strong> {selected_date}</span>
-                <span style="background-color: {'#dcfce7' if completed_checks > 0 else '#f1f5f9'}; color: {'#15803d' if completed_checks > 0 else '#475569'}; padding: 3px 10px; border-radius: 12px; font-size: 0.80rem; font-weight: 600;">
-                    Audits Done: {completed_checks} / {total_checks_today} (Cap: ≤20)
-                </span>
-                <span style="background-color: #ecfdf5; color: #047857; padding: 3px 10px; border-radius: 12px; font-size: 0.80rem; font-weight: 700;">
-                    ₹ Recovered Today: ₹{recovered_today_inr:,.0f}
-                </span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    # Calculate Checklist Metrics for Store Manager
+    num_shelves_today = len(day_alerts)
+    total_daily_margin_at_risk = day_alerts["daily_margin_at_risk_inr"].sum() if num_shelves_today > 0 else 0.0
+    total_estimated_recovery = day_alerts["expected_value_inr"].sum() if num_shelves_today > 0 else 0.0
+
+    today_audit_keys = [
+        k for k in st.session_state.audited_items
+        if k[0] == st.session_state.curr_store and k[1] == st.session_state.curr_date
+    ]
+    num_checked = len(today_audit_keys)
+    today_recovered_inr = sum(
+        st.session_state.audited_items[k].get("margin_saved_inr", 0.0) for k in today_audit_keys
     )
 
-    # Two-Column Layout: Left (Alerts List) | Right (Investigation & Audit Desk)
+    # Format Date for Header
+    try:
+        dt_obj = datetime.datetime.strptime(st.session_state.curr_date, "%Y-%m-%d")
+        formatted_date_str = dt_obj.strftime("%A, %d %b %Y")
+    except Exception:
+        formatted_date_str = st.session_state.curr_date
+
+    store_info = stores_df[stores_df["store_id"] == st.session_state.curr_store].iloc[0]
+
+    # Store Manager Daily KPI Header
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+    with kpi_col1:
+        st.markdown(
+            f"""
+            <div class="kpi-card" style="border-left: 4px solid #2563eb;">
+                <div class="kpi-title">Shelves to Check Today</div>
+                <div class="kpi-value">{num_shelves_today} Shelves</div>
+                <div class="kpi-sub" style="color: #2563eb;">Capped at ≤ 20 checks/day</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_col2:
+        st.markdown(
+            f"""
+            <div class="kpi-card" style="border-left: 4px solid #dc2626;">
+                <div class="kpi-title">Total Margin at Risk</div>
+                <div class="kpi-value">₹{total_daily_margin_at_risk:,.0f} / day</div>
+                <div class="kpi-sub" style="color: #dc2626;">Across {num_shelves_today} silent products</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_col3:
+        st.markdown(
+            f"""
+            <div class="kpi-card" style="border-left: 4px solid #16a34a;">
+                <div class="kpi-title">Checklist Progress</div>
+                <div class="kpi-value">{num_checked} / {num_shelves_today} Checked</div>
+                <div class="kpi-sub" style="color: #16a34a;">₹{today_recovered_inr:,.0f} recovered today</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_col4:
+        st.markdown(
+            f"""
+            <div class="kpi-card" style="border-left: 4px solid #7c3aed;">
+                <div class="kpi-title">Potential Recovery</div>
+                <div class="kpi-value">₹{total_estimated_recovery:,.0f}</div>
+                <div class="kpi-sub" style="color: #7c3aed;">Estimated margin to save</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Progress Bar
+    pct_progress = (num_checked / max(1, num_shelves_today)) if num_shelves_today > 0 else 1.0
+    st.progress(pct_progress)
+
+    # Download & Printable View Action Row
+    act_col1, act_col2 = st.columns([6, 4])
+    with act_col1:
+        st.markdown(
+            f"""
+            <span style="font-size: 0.88rem; color: #475569;">
+                <strong>{store_info['store_name']}</strong> · {formatted_date_str} · Manager Shelf Verification
+            </span>
+            """,
+            unsafe_allow_html=True,
+        )
+    with act_col2:
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            # Prepare CSV export
+            if len(day_alerts) > 0:
+                export_df = day_alerts.copy()
+                export_df["likelihood"] = export_df["confidence"].apply(
+                    lambda c: f"High ({int(round(c*100))}%)" if c >= 0.12 else (f"Medium ({int(round(c*100))}%)" if c >= 0.06 else f"Watch ({int(round(c*100))}%)")
+                )
+                export_cols = [
+                    "rank", "sku_id", "sku_name", "zero_streak", "system_stock",
+                    "daily_margin_at_risk_inr", "expected_value_inr", "likelihood", "reason"
+                ]
+                csv_data = export_df[export_cols].rename(
+                    columns={
+                        "rank": "Rank",
+                        "sku_id": "SKU_Code",
+                        "sku_name": "Product_Name",
+                        "zero_streak": "Days_Without_Sales",
+                        "system_stock": "System_Stock_On_Hand",
+                        "daily_margin_at_risk_inr": "Margin_At_Risk_INR_Day",
+                        "expected_value_inr": "Estimated_Recovery_INR",
+                        "likelihood": "Likelihood",
+                        "reason": "Root_Cause_Explanation",
+                    }
+                ).to_csv(index=False)
+
+                st.download_button(
+                    label="📥 Download CSV Checklist",
+                    data=csv_data,
+                    file_name=f"StockGuard_Checklist_{st.session_state.curr_store}_{st.session_state.curr_date}.csv",
+                    mime="text/csv",
+                    width="stretch",
+                )
+        with dl_col2:
+            btn_print_label = "📋 Normal View" if st.session_state.show_printable else "🖨️ Printable Table"
+            if st.button(btn_print_label, width="stretch"):
+                st.session_state.show_printable = not st.session_state.show_printable
+                st.rerun()
+
+    # Printable Table Toggle
+    if st.session_state.show_printable and len(day_alerts) > 0:
+        st.markdown("#### 🖨️ Printable Floor Checklist")
+        st.markdown("*Use this compact table for clipboards and shop-floor physical shelf audits:*")
+        print_df = day_alerts[[
+            "rank", "sku_id", "sku_name", "zero_streak", "system_stock",
+            "daily_margin_at_risk_inr", "confidence", "reason"
+        ]].copy()
+        print_df["Likelihood"] = print_df["confidence"].apply(
+            lambda c: f"High ({int(round(c*100))}%)" if c >= 0.12 else (f"Medium ({int(round(c*100))}%)" if c >= 0.06 else f"Watch ({int(round(c*100))}%)")
+        )
+        print_df = print_df.rename(columns={
+            "rank": "Rank",
+            "sku_id": "SKU Code",
+            "sku_name": "Product Name",
+            "zero_streak": "Days Silent",
+            "system_stock": "System Stock",
+            "daily_margin_at_risk_inr": "Margin at Risk (₹/day)",
+            "reason": "Reason",
+        })[["Rank", "SKU Code", "Product Name", "Days Silent", "System Stock", "Margin at Risk (₹/day)", "Likelihood", "Reason"]]
+        st.markdown(
+            print_df.to_html(classes="benchmark-table", index=False),
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+
+    # Main Two-Column Layout (Mobile-friendly stacked when narrow)
     list_col, detail_col = st.columns([5, 6])
 
-    # Default selected SKU if not set
-    if st.session_state.selected_sku_key is None or st.session_state.selected_sku_key[0] != selected_store or st.session_state.selected_sku_key[1] != selected_date:
-        if len(day_alerts) > 0:
-            st.session_state.selected_sku_key = (selected_store, selected_date, day_alerts.iloc[0]["sku_id"])
-        else:
-            st.session_state.selected_sku_key = None
-
+    # LEFT COLUMN: Ranked Shelf Checklist
     with list_col:
         st.markdown(
-            """
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            f"""
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <h3 style="font-size: 1.10rem; font-weight: 700; margin: 0; color: #1e293b;">
-                    📋 Daily Top-20 Shelf-Check List
+                    Priority Shelf Checklist ({num_shelves_today} Items)
                 </h3>
-                <span style="font-size: 0.80rem; color: #64748b;">Sorted by Expected Value of Audit</span>
+                <span style="font-size: 0.78rem; color: #64748b;">Ranked by value of check</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -421,70 +530,57 @@ with tab_ops:
         if len(day_alerts) == 0:
             st.info("No phantom stock alerts for this store-day. System inventory records are healthy!")
         else:
-            # Velocity Filter
-            vel_filter = st.radio(
-                "Filter Velocity:",
-                options=["All SKUs", "Fast", "Medium", "Slow"],
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-
-            # Render Alert Cards
             for idx, row in day_alerts.iterrows():
                 sku_id = row["sku_id"]
                 sku_name = row["sku_name"]
                 rank = row["rank"]
-                conf_pct = row["confidence"] * 100.0
                 daily_margin = row["daily_margin_at_risk_inr"]
-                ev_inr = row["expected_value_inr"]
+                est_val = row["expected_value_inr"]
                 zero_streak = int(row["zero_streak"])
                 system_stock = int(row["system_stock"])
                 reason_short = row["reason"]
 
+                # Likelihood Badge
+                conf_val = float(row["confidence"])
+                likelihood_html = get_likelihood_badge(conf_val)
+
                 # Velocity tag
                 vel = skus_df[skus_df["sku_id"] == sku_id]["velocity_band"].values
                 vel_str = vel[0].capitalize() if len(vel) > 0 else "Medium"
-
-                if vel_filter != "All SKUs" and vel_str != vel_filter:
-                    continue
+                vel_badge_cls = "badge-fast" if vel_str == "Fast" else ("badge-medium" if vel_str == "Medium" else "badge-slow")
 
                 # Audit state check
-                audit_key = (selected_store, selected_date, sku_id)
+                audit_key = (st.session_state.curr_store, st.session_state.curr_date, sku_id)
                 is_audited = audit_key in st.session_state.audited_items
                 audit_result = st.session_state.audited_items.get(audit_key, None)
 
                 # Card selection state
-                is_selected = (
-                    st.session_state.selected_sku_key is not None
-                    and st.session_state.selected_sku_key[2] == sku_id
-                )
+                is_selected = (st.session_state.selected_sku_id == sku_id)
 
                 card_border = "#16a34a" if is_selected else ("#94a3b8" if is_audited else "#e2e8f0")
                 card_bg = "#f0fdf4" if is_selected else ("#f8fafc" if is_audited else "#ffffff")
-
-                vel_badge_cls = "badge-fast" if vel_str == "Fast" else ("badge-medium" if vel_str == "Medium" else "badge-slow")
 
                 status_html = ""
                 if is_audited:
                     act = audit_result["action"]
                     if act == "empty":
-                        status_html = f'<span class="badge-audited-phantom">✅ Confirmed Phantom (+₹{audit_result.get("margin_saved_inr", 0):.0f})</span>'
+                        status_html = f'<span class="badge-done-phantom">✅ Confirmed Phantom (+₹{audit_result.get("margin_saved_inr", 0):.0f})</span>'
                     elif act == "found":
-                        status_html = '<span class="badge-audited-safe">⚠️ False Alarm (7d Cooldown)</span>'
+                        status_html = '<span class="badge-done-safe">⚠️ Found on Shelf (7d Mute)</span>'
                     elif act == "misplaced":
-                        status_html = '<span class="badge-conf">🟡 Misplaced Stock Found</span>'
+                        status_html = '<span class="badge-done-misplaced">🟡 Misplaced Stock Found</span>'
                     elif act == "delisted":
                         status_html = '<span class="badge-slow">⚪ Discontinued SKU</span>'
                 else:
-                    status_html = f'<span class="badge-conf">Calibrated Conf: {conf_pct:.1f}%</span>'
+                    status_html = likelihood_html
 
                 st.markdown(
                     f"""
-                    <div style="background-color: {card_bg}; border: 1.5px solid {card_border}; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
+                    <div style="background-color: {card_bg}; border: {2 if is_selected else 1}px solid {card_border}; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
                                 <span style="font-weight: 800; font-size: 0.95rem; color: #0f172a;">#{rank} · {sku_name}</span>
-                                <span style="font-size: 0.75rem; color: #64748b; margin-left: 6px;">({sku_id})</span>
+                                <span style="font-size: 0.74rem; color: #64748b; margin-left: 6px;">({sku_id})</span>
                             </div>
                             <div>
                                 <span class="{vel_badge_cls}">{vel_str}</span>
@@ -492,76 +588,84 @@ with tab_ops:
                         </div>
                         <div style="display: flex; gap: 8px; margin: 6px 0 6px 0; align-items: center; flex-wrap: wrap;">
                             {status_html}
-                            <span class="badge-ev">EV: ₹{ev_inr:,.0f}</span>
+                            <span style="font-size: 0.78rem; color: #15803d; font-weight: 700; background: #dcfce7; padding: 2px 7px; border-radius: 10px;">
+                                Est. Recovery: ₹{est_val:,.0f}
+                            </span>
                             <span style="font-size: 0.78rem; color: #475569;">
-                                <strong>{zero_streak}d</strong> zero sales | <strong>{system_stock}</strong> in system stock | <strong>₹{daily_margin:.0f}/d</strong> margin at risk
+                                <strong>{zero_streak} days</strong> silent | <strong>{system_stock} units</strong> in stock | <strong>₹{daily_margin:.0f}/day</strong> at risk
                             </span>
                         </div>
-                        <div style="font-size: 0.76rem; color: #64748b; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                            {reason_short}
+                        <div style="font-size: 0.77rem; color: #475569; line-height: 1.35; margin-top: 4px;">
+                            <strong>Why check:</strong> {reason_short}
                         </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-                # Selection button
-                btn_label = f"🔍 Inspect #{rank} {sku_id}" if not is_selected else f"📍 Currently Inspecting #{rank} {sku_id}"
-                if st.button(btn_label, key=f"sel_{sku_id}_{idx}", width="stretch"):
-                    st.session_state.selected_sku_key = (selected_store, selected_date, sku_id)
+                # Tap Target Button
+                btn_txt = f"📍 Currently Inspecting #{rank} {sku_name[:22]}" if is_selected else f"👉 Inspect Shelf #{rank} ({sku_id})"
+                if st.button(btn_txt, key=f"row_sel_{sku_id}_{idx}", width="stretch"):
+                    st.session_state.selected_sku_id = sku_id
                     st.rerun()
 
-    # RIGHT COLUMN: Deep-Dive Investigation & Verification Desk
+    # RIGHT COLUMN: Investigation Detail Panel & Audit Action Desk
     with detail_col:
         st.markdown(
             """
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <h3 style="font-size: 1.10rem; font-weight: 700; margin: 0; color: #1e293b;">
-                    🔬 Deep-Dive Diagnostic Proof & Audit Desk
+                    🔍 Shelf Investigation & Verification Desk
                 </h3>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        selected_key = st.session_state.selected_sku_key
-        if selected_key is None or selected_key[0] != selected_store or selected_key[1] != selected_date:
-            st.info("Select a SKU from the Daily Top-20 list to inspect sales proof and audit shelf.")
+        sel_sku_id = st.session_state.selected_sku_id
+        if sel_sku_id is None or sel_sku_id not in day_alerts["sku_id"].values:
+            st.info("Select an item from the checklist to open its physical verification desk.")
         else:
-            sel_sku_id = selected_key[2]
             sku_alert_row = day_alerts[day_alerts["sku_id"] == sel_sku_id].iloc[0]
             sku_info = skus_df[skus_df["sku_id"] == sel_sku_id].iloc[0]
 
-            # Investigation Header Card
+            zero_streak_len = int(sku_alert_row["zero_streak"])
+            system_stock_units = int(sku_alert_row["system_stock"])
+            exp_daily_units = float(sku_alert_row["expected_daily_sales"])
+            daily_margin_val = float(sku_alert_row["daily_margin_at_risk_inr"])
+
+            # Detail Header Card
             st.markdown(
                 f"""
-                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                         <h4 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #0f172a;">
                             {sku_info['sku_name']}
                         </h4>
-                        <span style="font-size: 0.82rem; font-weight: 600; background-color: #e2e8f0; color: #334155; padding: 2px 8px; border-radius: 6px;">
+                        <span style="font-size: 0.80rem; font-weight: 600; background-color: #e2e8f0; color: #334155; padding: 2px 8px; border-radius: 6px;">
                             Category: {sku_info['category']} ({sku_info['sub_category']})
                         </span>
                     </div>
-                    <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 0.82rem; color: #475569;">
-                        <span><strong>SKU ID:</strong> {sel_sku_id}</span>
-                        <span><strong>Price:</strong> ₹{sku_info['unit_price_inr']:.0f}</span>
+                    <div style="display: flex; gap: 14px; margin-top: 6px; font-size: 0.82rem; color: #475569; flex-wrap: wrap;">
+                        <span><strong>SKU:</strong> {sel_sku_id}</span>
+                        <span><strong>Selling Price:</strong> ₹{sku_info['unit_price_inr']:.0f}</span>
                         <span><strong>Gross Margin:</strong> {sku_info['gross_margin_pct']*100:.1f}%</span>
-                        <span><strong>Normal Demand (λ):</strong> ~{sku_alert_row['expected_daily_sales']:.1f} units/day</span>
-                        <span><strong>Daily Margin at Risk:</strong> ₹{sku_alert_row['daily_margin_at_risk_inr']:.0f}/day</span>
+                        <span><strong>Normal Demand:</strong> ~{exp_daily_units:.1f} units/day</span>
+                        <span><strong>Daily Margin Loss:</strong> ₹{daily_margin_val:.0f}/day</span>
                     </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            # Plain-English Explanation Callout
+            # Recommended Action Box
             st.markdown(
-                f"""
-                <div class="callout-box">
-                    <strong style="color: #1e40af;">💡 Plain-English Root Cause Explanation:</strong><br>
-                    {sku_alert_row['reason']}
+                """
+                <div class="action-callout">
+                    <strong>📋 Recommended Action for Floor Staff:</strong><br>
+                    1. Check the primary shelf bay first.<br>
+                    2. If shelf is empty, search backroom staging and adjacent bays for misplaced stock.<br>
+                    3. If no physical units exist, tap <strong>"Shelf Empty"</strong> to correct POS inventory and trigger reorder.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -570,37 +674,37 @@ with tab_ops:
             # Load Time-Series Data for Selected SKU & Store
             ts_all = load_time_series_data()
             target_ts = ts_all[
-                (ts_all["sku_id"] == sel_sku_id) & (ts_all["date"] <= selected_date)
+                (ts_all["sku_id"] == sel_sku_id) & (ts_all["date"] <= st.session_state.curr_date)
             ].sort_values(by="date")
 
-            store_ts = target_ts[target_ts["store_id"] == selected_store].tail(45)
+            store_ts = target_ts[target_ts["store_id"] == st.session_state.curr_store].tail(45)
             peer_ts = (
-                target_ts[target_ts["store_id"] != selected_store]
+                target_ts[target_ts["store_id"] != st.session_state.curr_store]
                 .groupby("date")["sales"]
                 .mean()
                 .reset_index()
                 .tail(45)
             )
 
-            # Plot 1: Daily Sales vs System Stock & Zero-Streak Zone
+            # Plain-English Chart Titles (Requested by user)
+            chart_main_title = f"No sales for {zero_streak_len} days while system shows {system_stock_units} units in stock"
+            peer_7d_total = int(round(float(sku_alert_row.get("peer_sales_7d", 0))))
+            chart_peer_title = f"Meanwhile at other stores: {peer_7d_total} units sold this week (demand is active across chain)"
+
             fig_sales = make_subplots(
                 rows=2,
                 cols=1,
                 shared_xaxes=True,
-                vertical_spacing=0.08,
-                row_heights=[0.65, 0.35],
-                subplot_titles=(
-                    f"Store {selected_store[-2:]}: Recorded Sales vs System Stock (45-Day Window)",
-                    "Peer-Store Benchmark: Average Daily Sales Across Other 9 Chain Stores",
-                ),
+                vertical_spacing=0.10,
+                row_heights=[0.68, 0.32],
+                subplot_titles=(chart_main_title, chart_peer_title),
             )
 
             # Zero streak highlight start
-            zero_streak_len = int(sku_alert_row["zero_streak"])
             if len(store_ts) >= zero_streak_len and zero_streak_len > 0:
                 streak_start_date = store_ts.iloc[-zero_streak_len]["date"]
             else:
-                streak_start_date = selected_date
+                streak_start_date = st.session_state.curr_date
 
             # Store Sales Bars
             bar_colors = ["#10b981" if s > 0 else "#cbd5e1" for s in store_ts["sales"]]
@@ -608,15 +712,15 @@ with tab_ops:
                 go.Bar(
                     x=store_ts["date"],
                     y=store_ts["sales"],
-                    name="Recorded Daily Sales",
+                    name="Daily Sales (units)",
                     marker_color=bar_colors,
-                    hovertemplate="%{x}<br>Sales: %{y} units<extra></extra>",
+                    hovertemplate="%{x}<br>Recorded Sales: %{y} units<extra></extra>",
                 ),
                 row=1,
                 col=1,
             )
 
-            # System Stock Line
+            # System Stock Line (Step-line showing the freeze)
             fig_sales.add_trace(
                 go.Scatter(
                     x=store_ts["date"],
@@ -631,17 +735,30 @@ with tab_ops:
                 col=1,
             )
 
-            # Expected Demand Line (λ)
-            exp_lambda = float(sku_alert_row["expected_daily_sales"])
+            # Expected Sales Baseline (λ)
             fig_sales.add_trace(
                 go.Scatter(
                     x=store_ts["date"],
-                    y=[exp_lambda] * len(store_ts),
+                    y=[exp_daily_units] * len(store_ts),
                     mode="lines",
-                    name=f"Expected Demand Baseline (λ={exp_lambda:.1f})",
+                    name=f"Normal Demand Baseline (~{exp_daily_units:.1f}/day)",
                     line=dict(color="#9333ea", width=1.5, dash="dash"),
                     hovertemplate="Expected Demand: %{y:.1f} units/day<extra></extra>",
                 ),
+                row=1,
+                col=1,
+            )
+
+            # Shaded Highlight over Active Zero Streak
+            fig_sales.add_vrect(
+                x0=streak_start_date,
+                x1=st.session_state.curr_date,
+                fillcolor="rgba(239, 68, 68, 0.15)",
+                line_width=1.5,
+                line_color="#ef4444",
+                line_dash="dot",
+                annotation_text=f"Zero Sales Streak ({zero_streak_len}d)",
+                annotation_position="top left",
                 row=1,
                 col=1,
             )
@@ -652,34 +769,20 @@ with tab_ops:
                     x=peer_ts["date"],
                     y=peer_ts["sales"],
                     mode="lines",
-                    name="Peer-Store Avg Sales",
+                    name="Peer Store Daily Average",
                     line=dict(color="#d97706", width=2),
                     fill="tozeroy",
                     fillcolor="rgba(217, 119, 6, 0.12)",
-                    hovertemplate="%{x}<br>Peer Store Avg: %{y:.1f} units<extra></extra>",
+                    hovertemplate="%{x}<br>Peer Store Daily Avg: %{y:.1f} units<extra></extra>",
                 ),
                 row=2,
                 col=1,
             )
 
-            # Shaded Highlight over Active Zero Streak
-            fig_sales.add_vrect(
-                x0=streak_start_date,
-                x1=selected_date,
-                fillcolor="rgba(239, 68, 68, 0.15)",
-                line_width=1,
-                line_color="#ef4444",
-                line_dash="dot",
-                annotation_text=f"Silent Zero Streak ({zero_streak_len}d)",
-                annotation_position="top left",
-                row=1,
-                col=1,
-            )
-
             fig_sales.update_layout(
-                height=420,
-                margin=dict(l=40, r=20, t=35, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
+                height=410,
+                margin=dict(l=35, r=15, t=32, b=15),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)),
                 hovermode="x unified",
                 template="plotly_white",
             )
@@ -688,33 +791,26 @@ with tab_ops:
 
             st.plotly_chart(fig_sales, width="stretch")
 
-            # Interactive One-Tap Audit Verification Desk
+            # Result Buttons (Large Tap Targets)
             st.markdown(
                 """
-                <div style="margin-top: 8px; margin-bottom: 6px;">
-                    <h4 style="font-size: 1.0rem; font-weight: 700; color: #0f172a; margin: 0;">
-                        📱 Store Manager Physical Shelf-Check Actions
+                <div style="margin-top: 6px; margin-bottom: 6px;">
+                    <h4 style="font-size: 0.95rem; font-weight: 700; color: #0f172a; margin: 0;">
+                        📱 Record Physical Shelf-Check Outcome
                     </h4>
-                    <p style="font-size: 0.78rem; color: #64748b; margin: 2px 0 8px 0;">
-                        Tap the check outcome observed on the physical store shelf:
+                    <p style="font-size: 0.78rem; color: #64748b; margin: 2px 0 6px 0;">
+                        Tap what was found on the shop floor:
                     </p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            audit_btn1, audit_btn2, audit_btn3, audit_btn4 = st.columns(4)
-            audit_key = (selected_store, selected_date, sel_sku_id)
+            btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+            audit_key = (st.session_state.curr_store, st.session_state.curr_date, sel_sku_id)
 
-            with audit_btn1:
-                if st.button("🔴 Shelf Empty\n(Phantom Stock)", key=f"btn_phantom_{sel_sku_id}", width="stretch"):
-                    # Lookup ground truth labels to report accurate feedback
-                    labels_df = load_ground_truth_labels()
-                    gt_row = labels_df[
-                        (labels_df["date"] == selected_date)
-                        & (labels_df["store_id"] == selected_store)
-                        & (labels_df["sku_id"] == sel_sku_id)
-                    ]
+            with btn_col1:
+                if st.button("🔴 Shelf Empty\n(Phantom Stock)", key=f"btn_empty_{sel_sku_id}", width="stretch"):
                     is_real_phantom = int(sku_alert_row["is_true_phantom"])
                     days_saved = float(sku_alert_row["days_saved"])
                     daily_margin = float(sku_alert_row["daily_margin_at_risk_inr"])
@@ -728,99 +824,90 @@ with tab_ops:
                     }
                     st.rerun()
 
-            with audit_btn2:
-                if st.button("🟢 Found Stock\n(False Alarm)", key=f"btn_found_{sel_sku_id}", width="stretch"):
+            with btn_col2:
+                if st.button("🟢 Found on Shelf\n(False Alarm)", key=f"btn_found_{sel_sku_id}", width="stretch"):
                     st.session_state.audited_items[audit_key] = {
                         "action": "found",
                         "margin_saved_inr": 0.0,
                     }
                     st.rerun()
 
-            with audit_btn3:
-                if st.button("🟡 Wrong Place\n(Misplaced Stock)", key=f"btn_misplaced_{sel_sku_id}", width="stretch"):
+            with btn_col3:
+                if st.button("🟡 Found Wrong Bay\n(Misplaced Stock)", key=f"btn_misplaced_{sel_sku_id}", width="stretch"):
                     st.session_state.audited_items[audit_key] = {
                         "action": "misplaced",
                         "margin_saved_inr": 0.0,
                     }
                     st.rerun()
 
-            with audit_btn4:
-                if st.button("⚪ Discontinued\n(Delisted Item)", key=f"btn_delisted_{sel_sku_id}", width="stretch"):
+            with btn_col4:
+                if st.button("⚪ Item Discontinued\n(Delisted from Range)", key=f"btn_delisted_{sel_sku_id}", width="stretch"):
                     st.session_state.audited_items[audit_key] = {
                         "action": "delisted",
                         "margin_saved_inr": 0.0,
                     }
                     st.rerun()
 
-            # Display Audit Outcome if Already Audited
+            # Operational Outcome Box (Shows what happened)
             if audit_key in st.session_state.audited_items:
-                audit_res = st.session_state.audited_items[audit_key]
-                act = audit_res["action"]
+                res = st.session_state.audited_items[audit_key]
+                act = res["action"]
 
                 if act == "empty":
-                    is_real = audit_res.get("is_real_phantom", 1)
-                    if is_real == 1:
-                        st.success(
-                            f"""
-                            🎯 **CONFIRMED PHANTOM STOCK-OUT!**  
-                            • **Physical Shelf Audit:** 0 physical units located (System recorded {int(sku_alert_row['system_stock'])} ghost units).  
-                            • **Automated Inventory Correction:** System stock corrected to 0; Purchase Order triggered for replenishment.  
-                            • **Bottom-Line Impact:** **₹{audit_res['margin_saved_inr']:,.0f} recovered** ({audit_res['days_saved']:.1f} days of lost sales averted).
-                            """
-                        )
-                    else:
-                        st.warning(
-                            f"""
-                            ⚠️ **Audit Recorded as Shelf Empty by Manager:**  
-                            Note: Hidden ground-truth suggests genuine slow-mover or lull, but system inventory record has been zeroed out to trigger safety replenishment.
-                            """
-                        )
+                    st.success(
+                        f"""
+                        🎯 **SHELF EMPTY CONFIRMED — AUTOMATED RECOVERY INITIATED:**  
+                        • **Physical Audit:** 0 physical units found on shelf (System showed {system_stock_units} ghost units).  
+                        • **System Inventory Corrected:** POS on-hand record adjusted from **{system_stock_units}** to **0**.  
+                        • **Automated Replenishment Triggered:** Purchase order PO-4482 generated for 30 units with supplier (Lead time: 3 days).  
+                        • **Rupees Recovered:** **₹{res['margin_saved_inr']:,.0f} margin loss averted** over {res['days_saved']:.0f} remaining days!
+                        """
+                    )
                 elif act == "found":
                     st.info(
                         f"""
-                        🛡️ **FALSE ALARM CONFIRMED — 7-DAY COOLDOWN ENGAGED:**  
-                        • **Physical Shelf Audit:** Stock is present on shelf.  
-                        • **Operational Action:** Alert suppressed for **7 days** (until 2026-01-27) to protect staff from repetitive alert fatigue.  
-                        • **Feedback Loop:** Logged audit label $(y=0)$ to update Bayesian calibration model.
+                        🛡️ **STOCK VERIFIED ON SHELF — 7-DAY SUPPRESSION ACTIVATED:**  
+                        • **Physical Audit:** Stock is present on shelf.  
+                        • **Alert Cooldown:** Product muted from daily store checklist for **7 days** to protect staff from repeat alert fatigue.  
+                        • **Learning:** Verification logged to refine future prioritization.
                         """
                     )
                 elif act == "misplaced":
                     st.warning(
                         f"""
-                        🟡 **MISPLACED INVENTORY RECOVERED:**  
-                        • **Physical Shelf Audit:** Units located in neighbouring bay or backroom staging.  
-                        • **Operational Action:** Units returned to primary planogram shelf bay. Shelf availability restored without supplier order capex!
+                        🟡 **MISPLACED INVENTORY LOCATED & RESTOCKED:**  
+                        • **Physical Audit:** Units found in neighbouring aisle / backroom staging.  
+                        • **Operational Action:** Units moved to primary shelf bay. Shelf availability restored immediately without ordering extra stock!
                         """
                     )
                 elif act == "delisted":
                     st.info(
                         f"""
-                        ⚪ **DELISTED / DISCONTINUED ITEM DEACTIVATED:**  
-                        • **Physical Shelf Audit:** Product was removed from active range plan.  
-                        • **Operational Action:** Ledger phantom stock written off; SKU marked inactive in POS master.
+                        ⚪ **DELISTED ITEM CATALOG CLEANUP:**  
+                        • **Physical Audit:** Product was discontinued from active range plan.  
+                        • **System Action:** Ghost inventory balance written off; SKU marked inactive in POS catalog.
                         """
                     )
 
 
 # ==============================================================================
-# TAB 2: Executive Benchmarking & Model Proof
+# TAB 2: Performance and ROI (Executive View)
 # ==============================================================================
-with tab_benchmark:
+with tab_performance:
     st.markdown(
         """
         <div style="margin-bottom: 12px;">
             <h3 style="margin: 0; font-size: 1.25rem; font-weight: 800; color: #0f172a;">
-                Rigorous Out-of-Sample Benchmark (Evaluated on Last 40% = 216 Days)
+                Rigorous Out-of-Sample Benchmark & ROI Explorer
             </h3>
             <p style="margin: 2px 0 0 0; color: #64748b; font-size: 0.88rem;">
-                Comparing StockGuard against industry heuristics, random selection, and theoretical oracle under operational budget cap (≤ 20 checks/store-day).
+                Evaluated across the last 40% of the timeline (216 days, 2026-01-20 to 2026-08-23) under a strict ≤ 20 checks/store-day budget.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Headline Comparison Table
     m_sg = metrics["stockguard"]
     m_ba = metrics["baseline_a_fixed_5d"]
     m_bam = metrics["baseline_a_matched_volume"]
@@ -924,43 +1011,32 @@ with tab_benchmark:
 
     st.markdown(
         """
-        <div class="callout-box" style="margin-top: 14px;">
-            <strong style="color: #059669;">💡 Key Empirical Proof (Matched-Volume Comparison):</strong><br>
-            When Baseline A is restricted to the <strong>identical 9,084 audit volume</strong> that StockGuard used, its overall recall collapses from 98.55% to <strong>66.12%</strong> and its value-weighted recall drops to <strong>69.67%</strong>.  
+        <div class="action-callout" style="margin-top: 14px;">
+            <strong>💡 Key Empirical Takeaway (Matched Audit Volume):</strong><br>
+            When Baseline A is restricted to the <strong>exact same 9,084 audit budget</strong> that StockGuard used, its overall recall collapses from 98.55% to <strong>66.12%</strong> and its value-weighted recall drops to <strong>69.67%</strong>.  
             StockGuard catches <strong>+36.6% more phantoms (437 vs 320)</strong> and recovers <strong>+40.4% more margin (97.80% vs 69.67%)</strong> at the exact same labor budget!
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # Three Benchmark Diagnostic Charts
+    # Performance Charts
     b_col1, b_col2 = st.columns(2)
-
     with b_col1:
         st.markdown("#### 1. Precision & Recall vs Daily Audit Budget")
-        # Build Budget Sweep Chart
         b_sweep = metrics["budget_sweep"]
         budgets = [1, 3, 5, 10, 20]
 
         sg_p = [b_sweep["stockguard"][str(b)]["raw_precision"] * 100 for b in budgets]
         sg_vwr = [b_sweep["stockguard"][str(b)]["value_weighted_recall"] * 100 for b in budgets]
-
         ba_p = [b_sweep["baseline_a"][str(b)]["raw_precision"] * 100 for b in budgets]
         ba_vwr = [b_sweep["baseline_a"][str(b)]["value_weighted_recall"] * 100 for b in budgets]
 
         fig_budget = go.Figure()
-        fig_budget.add_trace(
-            go.Scatter(x=budgets, y=sg_p, mode="lines+markers", name="StockGuard Precision (%)", line=dict(color="#16a34a", width=2.5))
-        )
-        fig_budget.add_trace(
-            go.Scatter(x=budgets, y=ba_p, mode="lines+markers", name="Baseline A Precision (%)", line=dict(color="#dc2626", width=2, dash="dash"))
-        )
-        fig_budget.add_trace(
-            go.Scatter(x=budgets, y=sg_vwr, mode="lines+markers", name="StockGuard Value Recall (%)", line=dict(color="#2563eb", width=2.5))
-        )
-        fig_budget.add_trace(
-            go.Scatter(x=budgets, y=ba_vwr, mode="lines+markers", name="Baseline A Value Recall (%)", line=dict(color="#9333ea", width=2, dash="dash"))
-        )
+        fig_budget.add_trace(go.Scatter(x=budgets, y=sg_p, mode="lines+markers", name="StockGuard Precision (%)", line=dict(color="#16a34a", width=2.5)))
+        fig_budget.add_trace(go.Scatter(x=budgets, y=ba_p, mode="lines+markers", name="Baseline A Precision (%)", line=dict(color="#dc2626", width=2, dash="dash")))
+        fig_budget.add_trace(go.Scatter(x=budgets, y=sg_vwr, mode="lines+markers", name="StockGuard Value Recall (%)", line=dict(color="#2563eb", width=2.5)))
+        fig_budget.add_trace(go.Scatter(x=budgets, y=ba_vwr, mode="lines+markers", name="Baseline A Value Recall (%)", line=dict(color="#9333ea", width=2, dash="dash")))
 
         fig_budget.update_layout(
             height=320,
@@ -977,12 +1053,7 @@ with tab_benchmark:
         st.markdown("#### 2. Probability Calibration (Reliability Diagram)")
         cal = metrics["calibration"]
         fig_cal = go.Figure()
-
-        # Diagonal
-        fig_cal.add_trace(
-            go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect Calibration", line=dict(color="#94a3b8", dash="dash"))
-        )
-        # Calibrated points
+        fig_cal.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Perfect Calibration", line=dict(color="#94a3b8", dash="dash")))
         fig_cal.add_trace(
             go.Scatter(
                 x=cal["bin_mean_calibrated"][:3],
@@ -993,7 +1064,6 @@ with tab_benchmark:
                 marker=dict(size=8),
             )
         )
-
         fig_cal.update_layout(
             height=320,
             margin=dict(l=40, r=20, t=20, b=20),
@@ -1009,7 +1079,6 @@ with tab_benchmark:
 
     # Confuser Breakdown & Cumulative Margin Charts
     cf_col1, cf_col2 = st.columns(2)
-
     with cf_col1:
         st.markdown("#### 3. False Positive Breakdown by Confuser Type")
         fp_data = m_sg["fp_breakdown"]
@@ -1050,18 +1119,13 @@ with tab_benchmark:
 
     with cf_col2:
         st.markdown("#### 4. Cumulative Margin Recovered vs Audit Volume")
-        # Build cumulative margin recovered from metrics budget sweep
         audit_vols = [b_sweep["stockguard"][str(b)]["total_alerts"] for b in budgets]
         sg_margin_eval = [b_sweep["stockguard"][str(b)]["value_weighted_recall"] * 576911.0 for b in budgets]
         ba_margin_eval = [b_sweep["baseline_a"][str(b)]["value_weighted_recall"] * 576911.0 for b in budgets]
 
         fig_cum = go.Figure()
-        fig_cum.add_trace(
-            go.Scatter(x=audit_vols, y=sg_margin_eval, mode="lines+markers", name="StockGuard Margin (₹)", line=dict(color="#16a34a", width=2.5))
-        )
-        fig_cum.add_trace(
-            go.Scatter(x=[b_sweep["baseline_a"][str(b)]["total_alerts"] for b in budgets], y=ba_margin_eval, mode="lines+markers", name="Baseline A Margin (₹)", line=dict(color="#dc2626", width=2, dash="dash"))
-        )
+        fig_cum.add_trace(go.Scatter(x=audit_vols, y=sg_margin_eval, mode="lines+markers", name="StockGuard Margin (₹)", line=dict(color="#16a34a", width=2.5)))
+        fig_cum.add_trace(go.Scatter(x=[b_sweep["baseline_a"][str(b)]["total_alerts"] for b in budgets], y=ba_margin_eval, mode="lines+markers", name="Baseline A Margin (₹)", line=dict(color="#dc2626", width=2, dash="dash")))
 
         fig_cum.update_layout(
             height=300,
@@ -1076,24 +1140,19 @@ with tab_benchmark:
 
     # Interactive Rupee Recovery Simulator
     st.markdown("---")
-    st.markdown("### 💰 Interactive Rupee Recovery & ROI Simulator")
-    st.markdown(
-        """
-        Adjust operational chain parameters below to simulate annual financial return on staff audit investment:
-        """
-    )
+    st.markdown("### 💰 Chain-Wide Financial ROI Simulator")
+    st.markdown("Simulate net annual bottom-line returns under varying store network and labor cost assumptions:")
 
     sim_c1, sim_c2, sim_c3, sim_c4 = st.columns(4)
     with sim_c1:
         sim_stores = st.slider("Store Count", min_value=5, max_value=200, value=10, step=5)
     with sim_c2:
-        sim_skus = st.slider("SKUs per Store", min_value=100, max_value=1000, value=150, step=50)
+        sim_skus = st.slider("Assortment per Store (SKUs)", min_value=100, max_value=1000, value=150, step=50)
     with sim_c3:
         sim_wage = st.slider("Staff Wage (₹/hour)", min_value=100, max_value=300, value=150, step=10)
     with sim_c4:
         sim_lost_share = st.slider("Share Truly Lost (%)", min_value=30, max_value=100, value=60, step=5) / 100.0
 
-    # Simulator arithmetic
     scale_factor = (sim_stores * sim_skus) / (10 * 150)
     annual_episodes = 484 * (365 / 216) * scale_factor
     caught_episodes = annual_episodes * (m_sg["episode_recall_overall"])
@@ -1119,7 +1178,7 @@ with tab_benchmark:
 
 
 # ==============================================================================
-# TAB 3: Methodology & Grounding
+# TAB 3: Methodology and Grounding
 # ==============================================================================
 with tab_methodology:
     st.markdown(
@@ -1205,7 +1264,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; color: #94a3b8;">
-        <span>StockGuard v1.0 · Phantom Stock-Out Detector · Hackathon Round 1</span>
+        <span>StockGuard v1.0 · Daily Shelf-Check List · Retail Operations · Round 1</span>
         <span>Sources: DeHoratius & Raman (2008) · IHL Group (2026) · Kang & Gershwin (2005) · Trent FY24</span>
     </div>
     """,

@@ -76,13 +76,23 @@
     Added Oracle (100.0%) and Random Selection (~4.4%) rows to headline benchmark table.
   - **Robustness Grid:**
     Automated 5 stress scenarios (Baseline, Seed 101, Noisier Demand $\alpha=0.60$, Heavier Promos 2x, Longer Slow Tail 75% slow).
-- [Decision - Step 5 Implementation]:
+- [Decision - Step 5 Implementation & Manager-First Restructure]:
   - **Interactive Streamlit Dashboard (`app.py`):**
-    - Store Operations Desk: Daily top-20 list strictly capped at ≤ 20 audits/day, sorted by Expected Value of an audit ($EV = P \times \text{Daily Margin} \times \text{Days Saved} - \text{Cost}$).
-    - Visual Proof: Interactive dual-panel Plotly chart comparing recorded sales (bars) vs flatlined system stock (line) vs baseline demand ($\lambda$) with shaded zero streak, paired with peer-store average demand trajectory.
-    - Closed-Loop Shelf Audit Simulation: One-tap action buttons ("Shelf Empty", "Found Stock", "Wrong Place", "Discontinued") that update session state, calculate recovered rupees, and engage 7-day cooldowns for false alarms.
-    - Executive Benchmarking & ROI Simulator: Side-by-side benchmark table, budget sweep curves (1 to 20 checks/day), Platt reliability diagram, confuser false-positive breakdown, and dynamic chain-wide ROI calculator.
-    - Automated Testing: Added `tests/test_dashboard.py` leveraging `streamlit.testing.v1.AppTest` for headless UI verification. Full test suite: 10/10 passed in 7.5s.
+    - Default Landing Page = Store Manager View for one store:
+      - Header with date, "N shelves to check today", total margin at risk (₹), progress X/20 with progress bar.
+      - Product description tagline: "StockGuard gives retail store managers a daily, value-ranked list of up to 20 shelves to physically check — finding inventory records that say 'in stock' while the shelf is empty."
+      - Ranked list with store/SKU, plain-language likelihood (High/Medium/Low + small %), margin at risk per day, and the one-line reason directly visible in each card.
+      - Plain-English chart title: "No sales for N days while system shows X units in stock".
+      - Peer-store chart title: "Meanwhile at other stores: Y units sold this week (demand is active across chain)".
+      - Clear recommended action: "Check primary shelf bay first. If empty, search backroom staging and adjacent bays for misplaced units. If not found, confirm phantom stock-out."
+      - Four result buttons: "Shelf Empty", "Found on Shelf", "Found Wrong Bay", "Item Discontinued".
+      - Operational outcome cards showing: system corrected, reorder triggered, suppression for 7 days, rupees recovered.
+      - Technical wording (Bayesian, Poisson, EV) completely removed from Manager View.
+      - "Download today's checklist" button (CSV and printable clipboard view).
+      - Pre-selected demo video shortcut (Store 02, 2026-01-20, SKU_133 Mosquito Repellent).
+    - Executive Benchmarking & ROI Simulator moved to Tab 2: "Performance and ROI".
+    - Methodology, theory, citations, and 5-scenario robustness grid moved to Tab 3: "Methodology and Grounding".
+    - Automated Testing: Added `tests/test_dashboard.py` leveraging `streamlit.testing.v1.AppTest`, verifying manager view, checklist progress, download buttons, and audit outcomes. Full test suite: 11/11 passed in 6.6s.
 
 
 
