@@ -12,7 +12,7 @@ Ranks alerts under the manager's 20-check daily budget:
 
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 
 
 class ValueRanker:
@@ -25,7 +25,7 @@ class ValueRanker:
         max_checks_per_store: int = 20,
         mean_cycle_count_interval: float = 21.0,
         audit_cost_inr: float = 5.0,
-        min_posterior_threshold: float = 0.35
+        min_posterior_threshold: Union[float, Dict[str, float]] = 0.35
     ):
         self.max_checks_per_store = max_checks_per_store
         self.mean_cycle_count_interval = mean_cycle_count_interval
@@ -64,10 +64,19 @@ class ValueRanker:
             return pd.DataFrame()
             
         # Filter: must meet minimum statistical posterior confidence and positive expected value
-        eligible = candidates_df[
-            (candidates_df["posterior_p"] >= self.min_posterior_threshold) &
-            (candidates_df["expected_value_inr"] > 0)
-        ].copy()
+        if isinstance(self.min_posterior_threshold, dict) and "velocity_band" in candidates_df.columns:
+            thresh_series = candidates_df["velocity_band"].map(self.min_posterior_threshold).fillna(0.35)
+            eligible = candidates_df[
+                (candidates_df["posterior_p"] >= thresh_series) &
+                (candidates_df["expected_value_inr"] > 0)
+            ].copy()
+        else:
+            thresh = float(self.min_posterior_threshold) if not isinstance(self.min_posterior_threshold, dict) else 0.35
+            eligible = candidates_df[
+                (candidates_df["posterior_p"] >= thresh) &
+                (candidates_df["expected_value_inr"] > 0)
+            ].copy()
+
         
         if eligible.empty:
             return pd.DataFrame()

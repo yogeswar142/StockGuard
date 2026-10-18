@@ -56,7 +56,8 @@ def main():
         prior_phantom_rate=0.028,
         min_posterior_threshold=0.35,
         overdispersion_alpha=0.30,
-        audit_cost_inr=5.0
+        audit_cost_inr=5.0,
+        min_streak_for_peer_boost=4,
     )
 
     print("3. Executing day-by-day detection & audit feedback simulation...")

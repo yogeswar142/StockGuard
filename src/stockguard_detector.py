@@ -12,7 +12,7 @@ Combines:
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Union
 
 from src.baseline_models import BaseDetector
 from src.demand_estimator import DemandEstimator
@@ -31,11 +31,14 @@ class StockGuardDetector(BaseDetector):
         cooldown_days: int = 7,
         max_checks_per_store: int = 20,
         prior_phantom_rate: float = 0.028,
-        min_posterior_threshold: float = 0.35,
+        min_posterior_threshold: Union[float, Dict[str, float]] = 0.35,
         overdispersion_alpha: float = 0.30,
-        audit_cost_inr: float = 5.0
+        audit_cost_inr: float = 5.0,
+        min_streak_for_peer_boost: int = 4,
     ):
         super().__init__("StockGuard_Core", cooldown_days, max_checks_per_store)
+        # Suppress peer-store multiplier for streaks < this to prevent short-streak overconfidence
+        self.min_streak_for_peer_boost = min_streak_for_peer_boost
         self.demand_estimator = DemandEstimator()
         self.bayesian_detector = BayesianPhantomDetector(
             prior_phantom_rate=prior_phantom_rate,
@@ -48,6 +51,7 @@ class StockGuardDetector(BaseDetector):
             min_posterior_threshold=min_posterior_threshold
         )
         self.sku_names: Dict[str, str] = {}
+        self.sku_velocities: Dict[str, str] = {}
         self.sku_substitutes: Dict[str, str] = {}
 
     def fit_calibration(self, df_calibration: pd.DataFrame, df_sku: Optional[pd.DataFrame] = None):
@@ -58,6 +62,7 @@ class StockGuardDetector(BaseDetector):
         if df_sku is not None:
             for r in df_sku.itertuples():
                 self.sku_names[r.sku_id] = r.sku_name
+                self.sku_velocities[r.sku_id] = getattr(r, "velocity_band", "Medium")
                 if pd.notna(r.substitute_sku_id):
                     self.sku_substitutes[r.sku_id] = str(r.substitute_sku_id)
             self.corroborating_engine.substitute_map = self.sku_substitutes
@@ -197,6 +202,11 @@ def run_stockguard_simulation(
                     peer_mult = 0.85
                 else:
                     peer_mult = 1.0
+
+                # Suppress peer boost for short streaks (< min_streak_for_peer_boost days)
+                # to prevent overconfident alerts driven solely by peer activity.
+                if streak < detector.min_streak_for_peer_boost:
+                    peer_mult = min(peer_mult, 1.0)
                     
                 sub_sku_id = detector.sku_substitutes.get(r.sku_id)
                 if sub_sku_id:
@@ -216,10 +226,12 @@ def run_stockguard_simulation(
                         sub_mult = 1.0
                         sub_lift_pct = 0.0
                         sub_name = None
+                        sub_sales = 0
                 else:
                     sub_mult = 1.0
                     sub_lift_pct = 0.0
                     sub_name = None
+                    sub_sales = 0
                     
                 stock_hist = np.array(recent_stock_history.get(key, [stock]))
                 flat_mult = 1.25 if (len(stock_hist) >= 3 and np.all(stock_hist == stock_hist[0])) else 1.0
@@ -258,7 +270,9 @@ def run_stockguard_simulation(
                     "expected_value_inr": val_dict["expected_value_inr"],
                     "peer_units_7d": peer_units_7d,
                     "sub_name": sub_name,
-                    "sub_lift_pct": sub_lift_pct
+                    "sub_lift_pct": sub_lift_pct,
+                    "sub_units_7d": int(sub_sales),
+                    "velocity_band": detector.sku_velocities.get(r.sku_id, "Medium"),
                 })
                 
             if not candidate_rows:
@@ -292,6 +306,7 @@ def run_stockguard_simulation(
                     
                 # Generate explanation
                 sub_label = detector.sku_names.get(c_row["sub_name"], c_row["sub_name"]) if c_row["sub_name"] else None
+                sub_units = int(c_row.get("sub_units_7d", 0))
                 reason = generate_plain_english_reason(
                     expected_daily_demand=c_row["expected_lambda"],
                     daily_revenue_inr=c_row["daily_margin_at_risk"],
@@ -300,7 +315,8 @@ def run_stockguard_simulation(
                     peer_sales_7d=int(c_row["peer_units_7d"]),
                     substitute_name=sub_label,
                     substitute_lift_pct=float(c_row["sub_lift_pct"]),
-                    confidence_pct=float(c_row["posterior_p"] * 100)
+                    confidence_pct=float(c_row["posterior_p"] * 100),
+                    sub_units_7d=sub_units,
                 )
                 
                 all_alerts.append({
@@ -318,6 +334,7 @@ def run_stockguard_simulation(
                     "expected_value_inr": float(c_row["expected_value_inr"]),
                     "days_saved": float(c_row["days_saved"]),
                     "peer_sales_7d": int(c_row["peer_units_7d"]),
+                    "sub_units_7d": sub_units,
                     "reason": reason,
                     "is_true_phantom": int(is_true_phantom),
                     "episode_id": ep_id,

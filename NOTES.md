@@ -53,3 +53,17 @@
 - [Assumption] Target runtime environment: Local Windows Python 3.11 with virtualenv.
 - [Assumption] Currency: Indian Rupees (₹).
 - [Assumption] Staff audit cost: ~₹150/hr (~₹5/check at 2 min per check).
+- [Decision - Step 3b] Calibration Fixes:
+  - Added `min_streak_for_peer_boost = 4` to suppress peer-store signal inflation on short 2-day streaks.
+  - Reason explanation thresholding: only show peer signal if `peer_sales_7d >= 10`, and substitute lift only if `lift >= 15%` AND `sub_units_7d >= 5`.
+  - Tested velocity-dependent thresholding strictly on calibration slice (days 160-323):
+    - Lowering threshold for fast/medium movers does NOT improve recall@7d (fast movers already cross 0.50 within 3 days).
+    - Lowering medium threshold allowed more false positives into the top-20 budget, dropping precision by 0.5-0.7 percentage points without recall gain.
+    - Result: Uniform threshold (0.35) combined with Expected Value ranking is empirically optimal.
+- [Decision - Step 4] Value & Benchmark Suite:
+  - Implemented budget sweeps (1, 3, 5, 10, 20 checks/store-day) across StockGuard, Baseline A, Baseline A Matched-Volume, Baseline B, Random, and Oracle.
+  - Value-Weighted Recall: evaluates share of total economic margin-at-risk caught (`price * margin * lambda * duration`).
+  - Annual Rupee Calculation:
+    $$\text{Net Annual Recovery} = \text{Caught Episodes} \times \bar{M}_{\text{daily}} \times \bar{D}_{\text{saved}} \times \frac{365}{D_{\text{eval}}} \times 0.60 - \text{Audit Cost}$$
+    accounting for 60% truly lost demand and ₹5 audit cost per check.
+

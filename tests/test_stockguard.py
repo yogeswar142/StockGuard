@@ -70,12 +70,29 @@ def test_plain_english_reason():
         peer_sales_7d=42,
         substitute_name="Tata Tea Gold",
         substitute_lift_pct=34.0,
-        confidence_pct=92.5
+        confidence_pct=92.5,
+        sub_units_7d=12,
     )
     assert "Usually sells ~3.5 units/day" in reason
     assert "840" in reason
     assert "6 consecutive days" in reason
     assert "12 units recorded in stock" in reason
-    assert "Nearby stores sold 42 units this week" in reason
+    assert "Peer stores sold 42 units this week" in reason
     assert "Tata Tea Gold" in reason
     assert "+34%" in reason
+
+    # Test signal suppression for weak evidence:
+    weak_reason = generate_plain_english_reason(
+        expected_daily_demand=1.0,
+        daily_revenue_inr=100.0,
+        zero_streak_days=5,
+        system_stock=4,
+        peer_sales_7d=3,            # < 10 units: should be suppressed
+        substitute_name="Tea",
+        substitute_lift_pct=10.0,   # < 15%: should be suppressed
+        confidence_pct=60.0,
+        sub_units_7d=2,             # < 5 units: should be suppressed
+    )
+    assert "Peer stores sold" not in weak_reason
+    assert "Tea" not in weak_reason
+
