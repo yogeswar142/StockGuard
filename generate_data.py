@@ -100,14 +100,117 @@ def main():
     print(f" STOCKGUARD SYNTHETIC DATA GENERATOR - Mode: {args.mode.upper()}")
     print("=" * 70)
 
+def compute_detailed_diagnostics(df_pos: pd.DataFrame, df_truth: pd.DataFrame, df_sku: pd.DataFrame, df_episodes: pd.DataFrame):
+    """
+    Computes and prints required statistical diagnostics:
+    - lambda per velocity band
+    - phantom share per band
+    - duration distribution
+    - non-phantom zero streak frequencies (3+, 5+, 7+ days) with stock > 0
+    - verification that all phantom rows have system_stock > 0
+    """
+    merged = pd.merge(df_pos, df_sku[["sku_id", "velocity_band", "base_demand_rate"]], on="sku_id")
+    merged = pd.merge(merged, df_truth[["date", "store_id", "sku_id", "is_phantom", "is_true_stockout", "is_demand_shock", "is_post_promo_lull", "is_slow_mover_zero"]], on=["date", "store_id", "sku_id"])
+    
+    print("\n" + "=" * 70)
+    print(" STATISTICAL DIAGNOSTICS & DATASET SANITY CHECKS")
+    print("=" * 70)
+    
+    # 1. Lambda & Sales per velocity band
+    print("\n[1] DEMAND VELOCITY BY BAND (Empirical Sales & Inherent Lambda):")
+    for band in ["Fast", "Medium", "Slow"]:
+        sub = merged[merged["velocity_band"] == band]
+        # In normal in-stock conditions
+        normal_sub = sub[(sub["is_phantom"] == 0) & (sub["system_stock"] > 0)]
+        mean_sales = normal_sub["sales"].mean()
+        base_lambda = sub["base_demand_rate"].mean()
+        print(f"  - {band:7s} Movers: Base Lambda = {base_lambda:.2f}/day | In-Stock Realized Mean Sales = {mean_sales:.2f}/day (Total rows: {len(sub):,})")
+
+    # 2. Phantom share per band
+    print("\n[2] PHANTOM PREVALENCE BY VELOCITY BAND:")
+    for band in ["Fast", "Medium", "Slow"]:
+        sub = merged[merged["velocity_band"] == band]
+        p_share = sub["is_phantom"].mean() * 100
+        p_count = sub["is_phantom"].sum()
+        print(f"  - {band:7s} Movers: Phantom Row Share = {p_share:.2f}% ({p_count:,} active phantom SKU-days)")
+
+    # 3. Episode duration distribution
+    phantom_eps = df_episodes[df_episodes["failure_type"] == "phantom"]
+    durations = phantom_eps["duration_days"]
+    print("\n[3] PHANTOM EPISODE DURATION DISTRIBUTION (Days):")
+    print(f"  - Count : {len(durations)}")
+    print(f"  - Mean  : {durations.mean():.1f} days")
+    print(f"  - Min   : {durations.min()} days")
+    print(f"  - 25%   : {durations.quantile(0.25):.0f} days")
+    print(f"  - 50%   : {durations.quantile(0.50):.0f} days (Median)")
+    print(f"  - 75%   : {durations.quantile(0.75):.0f} days")
+    print(f"  - 95%   : {durations.quantile(0.95):.0f} days")
+    print(f"  - Max   : {durations.max()} days")
+
+    # 4. Zero streak frequencies for non-phantom rows with stock > 0
+    print("\n[4] NATURAL ZERO STREAK FREQUENCIES (Non-Phantom Rows with System Stock > 0):")
+    # Compute streak lengths for each store-SKU trajectory
+    merged = merged.sort_values(["store_id", "sku_id", "date"]).copy()
+    
+    # Calculate consecutive zero sales days
+    is_zero = (merged["sales"] == 0).astype(int)
+    # Consecutive zero streak count
+    streak_counts = []
+    current_streak = 0
+    prev_key = None
+    
+    # Vectorized / fast series calculation of zero streaks
+    merged["is_zero_sale"] = (merged["sales"] == 0)
+    # Group cumulative count of zero sales
+    merged["streak_id"] = (~merged["is_zero_sale"]).groupby([merged["store_id"], merged["sku_id"]]).cumsum()
+    merged["zero_streak"] = merged.groupby(["store_id", "sku_id", "streak_id"])["is_zero_sale"].cumsum()
+    
+    non_phantom_in_stock = merged[(merged["is_phantom"] == 0) & (merged["system_stock"] > 0)]
+    for band in ["Fast", "Medium", "Slow"]:
+        band_sub = non_phantom_in_stock[non_phantom_in_stock["velocity_band"] == band]
+        total_band_rows = len(band_sub)
+        n_gte_3 = (band_sub["zero_streak"] >= 3).sum()
+        n_gte_5 = (band_sub["zero_streak"] >= 5).sum()
+        n_gte_7 = (band_sub["zero_streak"] >= 7).sum()
+        print(f"  - {band:7s} Movers: 3+ Zeros: {n_gte_3/total_band_rows*100:5.2f}% ({n_gte_3:,}) | "
+              f"5+ Zeros: {n_gte_5/total_band_rows*100:5.2f}% ({n_gte_5:,}) | "
+              f"7+ Zeros: {n_gte_7/total_band_rows*100:5.2f}% ({n_gte_7:,})")
+
+    # 5. Check all phantom rows have system_stock > 0
+    print("\n[5] INTEGRITY CHECK: All Phantom Rows Have System Stock > 0?")
+    phantom_rows = merged[merged["is_phantom"] == 1]
+    invalid_phantom_count = (phantom_rows["system_stock"] <= 0).sum()
+    min_stock_phantom = phantom_rows["system_stock"].min() if len(phantom_rows) > 0 else 0
+    print(f"  - Phantom rows total: {len(phantom_rows):,}")
+    print(f"  - Phantom rows with system_stock <= 0: {invalid_phantom_count}")
+    print(f"  - Minimum system stock during phantom episode: {min_stock_phantom}")
+    assert invalid_phantom_count == 0, "ERROR: Found phantom rows with system_stock <= 0!"
+    print("  -> PASSED: 100% of phantom episodes satisfy system_stock > 0.")
+    print("=" * 70 + "\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="StockGuard Synthetic Data Generator")
+    parser.add_argument("--mode", type=str, choices=["mvp", "full", "robustness"], default="mvp",
+                        help="Mode: mvp (10 stores x 150 SKUs x 540 saved days), full (25x800x540), or robustness")
+    parser.add_argument("--output_dir", type=str, default="data", help="Output directory for generated data")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    args = parser.parse_args()
+
+    print("=" * 70)
+    print(f" STOCKGUARD SYNTHETIC DATA GENERATOR - Mode: {args.mode.upper()}")
+    print("=" * 70)
+
     if args.mode == "mvp":
         n_stores = 10
         n_skus = 150
-        n_days = 180
+        n_days = 540
+        burn_in = 60
         df_store, df_sku, df_promo, df_pos, df_truth = generate_synthetic_data(
             n_stores=n_stores,
             n_skus=n_skus,
             n_days=n_days,
+            burn_in_days=burn_in,
             seed=args.seed,
             output_dir=args.output_dir
         )
@@ -115,15 +218,16 @@ def main():
         n_stores = 25
         n_skus = 800
         n_days = 540
+        burn_in = 60
         df_store, df_sku, df_promo, df_pos, df_truth = generate_synthetic_data(
             n_stores=n_stores,
             n_skus=n_skus,
             n_days=n_days,
+            burn_in_days=burn_in,
             seed=args.seed,
             output_dir=args.output_dir
         )
     elif args.mode == "robustness":
-        # Generates 3 robustness variants
         variants = [
             ("noisy_demand", {"overdispersion_alpha": 0.65}),
             ("heavy_promos", {"promo_frequency": 0.15}),
@@ -135,7 +239,8 @@ def main():
             generate_synthetic_data(
                 n_stores=10,
                 n_skus=150,
-                n_days=180,
+                n_days=540,
+                burn_in_days=60,
                 seed=args.seed + 10,
                 output_dir=v_dir,
                 **v_params
@@ -148,7 +253,7 @@ def main():
         meta = json.load(f)
 
     print("\n--- DATASET GENERATION SUMMARY ---")
-    print(f"Stores: {meta['n_stores']} | SKUs: {meta['n_skus']} | Days: {meta['n_days']}")
+    print(f"Stores: {meta['n_stores']} | SKUs: {meta['n_skus']} | Saved Days: {meta['n_days']} (Burn-in: 60 days discarded)")
     print(f"Total SKU-Store-Days: {meta['total_sku_days']:,}")
     print(f"Total Injected Phantom Episodes: {meta['total_phantom_episodes']}")
     print(f"Total Misplaced Episodes: {meta['total_misplaced_episodes']}")
@@ -163,10 +268,17 @@ def main():
     print("\n--- SAMPLE GROUND TRUTH LABELS (Hidden for Evaluation) ---")
     print(df_truth[df_truth["is_phantom"] == 1].head(5).to_string(index=False))
 
+    # Read ground truth episodes table for duration analytics
+    df_episodes = pd.read_csv(os.path.join(args.output_dir, "ground_truth_episodes.csv"))
+
+    # Compute and display required diagnostics
+    compute_detailed_diagnostics(df_pos, df_truth, df_sku, df_episodes)
+
     # Generate sanity plot
     generate_sanity_plot(df_pos, df_truth, df_sku, output_dir="results")
-    print("\nStep 1 (Data Generation) complete!")
+    print("Step 1 (Data Generation) complete!")
 
 
 if __name__ == "__main__":
     main()
+

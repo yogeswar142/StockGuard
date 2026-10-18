@@ -23,8 +23,9 @@ from typing import Dict, Tuple, Optional
 def generate_synthetic_data(
     n_stores: int = 10,
     n_skus: int = 150,
-    n_days: int = 180,
-    start_date: str = "2026-01-01",
+    n_days: int = 540,
+    burn_in_days: int = 60,
+    start_date: str = "2025-01-01",
     seed: int = 42,
     phantom_onset_prob: float = 0.001429,  # ~0.03 prevalence / 21 days mean duration
     mean_phantom_duration: int = 21,
@@ -38,9 +39,12 @@ def generate_synthetic_data(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Generates synthetic store inventory, POS sales, and hidden ground-truth labels.
+    Includes a 60-day burn-in discarded before saving, 540 saved days (18 months),
+    and hard confusers with stock > 0 (demand shock, post-promo lull, slow mover zeros).
     """
     np.random.seed(seed)
     os.makedirs(output_dir, exist_ok=True)
+    total_sim_days = burn_in_days + n_days
     
     # ---------------------------------------------------------
     # 1. STORE MASTER
@@ -77,7 +81,6 @@ def generate_synthetic_data(
     
     all_store_locations = store_names_tier1 + store_names_tier2
     if n_stores > len(all_store_locations):
-        # generate extra synthetic locations
         for i in range(len(all_store_locations), n_stores):
             all_store_locations.append((f"Branch {i+1}", f"City {i%5+1}", "Tier-2"))
     
@@ -177,7 +180,7 @@ def generate_synthetic_data(
                 "reorder_point": reorder_pt,
                 "reorder_quantity": reorder_qty,
                 "lead_time_days": lead_time,
-                "substitute_sku_id": None  # Assigned next
+                "substitute_sku_id": None
             })
             
     df_sku = pd.DataFrame(sku_records)
@@ -191,86 +194,100 @@ def generate_synthetic_data(
             df_sku.loc[df_sku["sku_id"] == s_idx, "substitute_sku_id"] = sub_target
 
     # ---------------------------------------------------------
-    # 3. CALENDAR & PROMO SCHEDULE
+    # 3. CALENDAR & PROMO SCHEDULE (Full timeline with burn-in)
     # ---------------------------------------------------------
     base_dt = datetime.strptime(start_date, "%Y-%m-%d")
-    date_list = [base_dt + timedelta(days=d) for d in range(n_days)]
+    sim_date_list = [base_dt + timedelta(days=d) for d in range(total_sim_days)]
     
-    # Festive calendar impacts (Republic day, Holi, Festive weekend, etc.)
-    festive_dates = {
-        "2026-01-26": 1.55,  # Republic Day Big Sale
-        "2026-01-25": 1.40,
-        "2026-01-24": 1.35,
-        "2026-03-03": 1.45,  # Holi week
-        "2026-03-04": 1.50,
-        "2026-04-14": 1.30,  # Baisakhi / Tamil New Year
-        "2026-05-01": 1.25,  # May Day holiday
+    # Indian Festive Calendar multi-year dates
+    festive_calendar = {
+        "01-26": 1.55,  # Republic Day Big Sale
+        "01-25": 1.40,
+        "01-24": 1.35,
+        "03-14": 1.45,  # Holi week
+        "03-15": 1.50,
+        "08-15": 1.50,  # Independence Day Sale
+        "08-14": 1.35,
+        "10-20": 1.65,  # Dussehra / Diwali build-up
+        "10-21": 1.70,
+        "10-22": 1.85,
+        "11-01": 1.60,  # Diwali peak
+        "11-02": 1.75,
+        "12-25": 1.30,  # Christmas / Year end
+        "12-31": 1.40,
     }
+    
+    # Pre-select Demand Shock SKUs (5% of SKUs undergo genuine prolonged drop)
+    demand_shock_skus = set(df_sku.sample(n=max(2, int(n_skus * 0.05)), random_state=seed)["sku_id"])
     
     # Generate promo table: (date, store_id, sku_id) -> promo_discount, promo_lift
     promo_rows = []
-    # Vectorized promo assignment: select active promo blocks
-    # SKUs run promos for 3-7 day blocks
+    promo_end_dates = set()  # (store_id, sku_id, date) for post-promo lull
+    
     for s_id in df_store["store_id"]:
         for sku_id in df_sku["sku_id"]:
-            # On average ~ promo_frequency share of days
-            n_promo_blocks = np.random.poisson(n_days * promo_frequency / 5.0)
+            n_promo_blocks = np.random.poisson(total_sim_days * promo_frequency / 5.0)
             for _ in range(n_promo_blocks):
-                p_start = np.random.randint(0, max(1, n_days - 7))
+                p_start = np.random.randint(0, max(1, total_sim_days - 10))
                 p_len = np.random.randint(3, 8)
                 disc = np.random.choice([0.10, 0.15, 0.20, 0.25])
                 lift = round(1.0 + disc * np.random.uniform(3.0, 5.0), 2)
-                for day_offset in range(min(p_len, n_days - p_start)):
-                    p_date = (base_dt + timedelta(days=p_start + day_offset)).strftime("%Y-%m-%d")
-                    promo_rows.append((p_date, s_id, sku_id, disc, lift))
+                for day_offset in range(p_len):
+                    if p_start + day_offset < total_sim_days:
+                        p_date = sim_date_list[p_start + day_offset].strftime("%Y-%m-%d")
+                        promo_rows.append((p_date, s_id, sku_id, disc, lift))
+                        
+                # Record post-promo lull window: 3-5 days after promo ends
+                lull_start = p_start + p_len
+                for l_day in range(lull_start, min(total_sim_days, lull_start + np.random.randint(3, 6))):
+                    promo_end_dates.add((s_id, sku_id, l_day))
                     
-    df_promo = pd.DataFrame(promo_rows, columns=["date", "store_id", "sku_id", "discount_pct", "promo_lift"]).drop_duplicates(subset=["date", "store_id", "sku_id"])
+    df_promo_all = pd.DataFrame(promo_rows, columns=["date", "store_id", "sku_id", "discount_pct", "promo_lift"]).drop_duplicates(subset=["date", "store_id", "sku_id"])
 
     # ---------------------------------------------------------
     # 4. SIMULATION DYNAMICS (Day-by-Day Loop)
     # ---------------------------------------------------------
-    # Fast indexing structures
     store_map = {row["store_id"]: row for _, row in df_store.iterrows()}
     sku_map = {row["sku_id"]: row for _, row in df_sku.iterrows()}
-    promo_dict = {(r.date, r.store_id, r.sku_id): r.promo_lift for r in df_promo.itertuples()}
+    promo_dict = {(r.date, r.store_id, r.sku_id): r.promo_lift for r in df_promo_all.itertuples()}
     
-    # Pre-select Delisted SKUs (e.g. 2% of SKUs delisted halfway through)
-    delisted_candidates = df_sku.sample(n=max(1, int(n_skus * 0.02)), random_state=seed)["sku_id"].tolist()
-    delisted_start_day = int(n_days * 0.65)
+    # Delisted SKUs (2% of SKUs delisted starting after burn-in + 200 days)
+    delisted_candidates = df_sku.sample(n=max(1, int(n_skus * 0.02)), random_state=seed+1)["sku_id"].tolist()
+    delisted_start_day = burn_in_days + int(n_days * 0.55)
     
-    # Daily logs
+    # Demand shock timing: mid-year seasonal drop (e.g. days 180-260)
+    shock_start_day = burn_in_days + 120
+    shock_end_day = burn_in_days + 240
+    
     pos_records = []
     ground_truth_records = []
     episode_records = []
-    
     episode_id_counter = 1
     
-    # State tracking: store_id -> sku_id -> dict(physical_stock, system_stock, orders, episode)
+    # State tracking: store_id -> sku_id -> dict
     state = {}
     for s_id in df_store["store_id"]:
         state[s_id] = {}
-        t_mult = store_map[s_id]["traffic_multiplier"]
         for sku_id in df_sku["sku_id"]:
             s_info = sku_map[sku_id]
-            init_stock = int(s_info["reorder_quantity"] * np.random.uniform(0.9, 1.8) + s_info["reorder_point"])
+            init_stock = int(s_info["reorder_quantity"] * np.random.uniform(1.0, 1.8) + s_info["reorder_point"])
             state[s_id][sku_id] = {
                 "physical_stock": init_stock,
                 "system_stock": init_stock,
-                "pending_orders": [],  # list of (arrival_day, qty)
-                "active_episode": None,  # dict(episode_id, type, onset_day, end_day)
-                "cooldown_until": 0,
+                "pending_orders": [],
+                "active_episode": None,
             }
             
-    # Day-of-week multipliers: Mon=0.85, Tue=0.88, Wed=0.92, Thu=0.95, Fri=1.12, Sat=1.35, Sun=1.30
     dow_multipliers = [0.85, 0.88, 0.92, 0.95, 1.12, 1.35, 1.30]
     
-    for day_idx, dt in enumerate(date_list):
+    for day_idx, dt in enumerate(sim_date_list):
         date_str = dt.strftime("%Y-%m-%d")
+        mm_dd = dt.strftime("%m-%d")
         dow = dt.weekday()
         dow_factor = dow_multipliers[dow]
-        festive_factor = festive_dates.get(date_str, 1.0)
+        festive_factor = festive_calendar.get(mm_dd, 1.0)
         
-        # Track which SKUs in each store have 0 physical stock today for substitute lift
+        # Track which SKUs have 0 physical stock today for substitute lift
         empty_physical_by_store = {}
         for s_id in df_store["store_id"]:
             empty_physical_by_store[s_id] = {
@@ -284,95 +301,96 @@ def generate_synthetic_data(
                 st = state[s_id][sku_id]
                 s_info = sku_map[sku_id]
                 
-                # A. Process arriving replenishment orders
+                # A. Arriving replenishment orders
                 remaining_orders = []
                 for arr_day, qty in st["pending_orders"]:
                     if arr_day <= day_idx:
-                        # Order arrived!
                         st["system_stock"] += qty
-                        # Physical stock only replenishes if goods are actually placed on shelf
-                        # (If phantom is active, physical shelf was emptied and replenishment delivery
-                        # does not happen if reorder never triggered; but if an order was already in-flight before phantom onset,
-                        # it lands on shelf unless stolen).
                         if st["active_episode"] and st["active_episode"]["type"] == "phantom":
-                            # Phantom: stock disappears / lost in backroom / theft
-                            pass
+                            pass  # Stolen / lost / not placed on shelf
                         else:
                             st["physical_stock"] += qty
                     else:
                         remaining_orders.append((arr_day, qty))
                 st["pending_orders"] = remaining_orders
                 
-                # B. Check Episode Onsets / Expirations
-                # Check if current episode has expired
+                # B. Episode Lifecycle (Onset & Expiry)
                 if st["active_episode"] and day_idx >= st["active_episode"]["end_day"]:
-                    # Episode ended (e.g. periodic cycle count discovery / reset)
                     ep = st["active_episode"]
-                    episode_records.append({
-                        "episode_id": ep["episode_id"],
-                        "store_id": s_id,
-                        "sku_id": sku_id,
-                        "onset_date": date_list[ep["onset_day"]].strftime("%Y-%m-%d"),
-                        "end_date": date_str,
-                        "duration_days": day_idx - ep["onset_day"],
-                        "failure_type": ep["type"]
-                    })
-                    # Reset physical stock to system stock upon audit/cycle count
+                    # If this episode was active during the saved window, log it
+                    if ep["end_day"] >= burn_in_days:
+                        episode_records.append({
+                            "episode_id": ep["episode_id"],
+                            "store_id": s_id,
+                            "sku_id": sku_id,
+                            "onset_date": sim_date_list[ep["onset_day"]].strftime("%Y-%m-%d"),
+                            "end_date": date_str,
+                            "duration_days": day_idx - ep["onset_day"],
+                            "failure_type": ep["type"]
+                        })
                     st["physical_stock"] = max(0, st["system_stock"])
                     st["active_episode"] = None
                     
-                # Inject new episode if eligible
-                if st["active_episode"] is None and day_idx < n_days - 10:
-                    # Check Delisted condition
+                # New Episode Injection (burn-in allowed to run smoothly; onset strictly requires system_stock >= 3)
+                if st["active_episode"] is None and day_idx < total_sim_days - 10:
                     if sku_id in delisted_candidates and day_idx >= delisted_start_day:
-                        ep_dur = n_days - day_idx
                         st["active_episode"] = {
                             "episode_id": f"EP_{episode_id_counter:05d}",
                             "type": "delisted",
                             "onset_day": day_idx,
-                            "end_day": day_idx + ep_dur
+                            "end_day": total_sim_days
                         }
                         episode_id_counter += 1
                         st["physical_stock"] = 0
-                        # System stock freezes or slowly decays
-                    # Check Phantom Onset (Plan: ~0.143% hazard per day, requires system_stock > 2)
                     elif st["system_stock"] >= 3 and np.random.rand() < phantom_onset_prob:
-                        dur = int(np.clip(np.random.exponential(mean_phantom_duration), 7, 45))
+                        # Skewed duration: Geometric distribution with mean 21 days (clipped [7, 56])
+                        dur = int(np.clip(np.random.geometric(p=1.0 / mean_phantom_duration), 7, 56))
                         st["active_episode"] = {
                             "episode_id": f"EP_{episode_id_counter:05d}",
                             "type": "phantom",
                             "onset_day": day_idx,
-                            "end_day": min(n_days, day_idx + dur)
+                            "end_day": min(total_sim_days, day_idx + dur)
                         }
                         episode_id_counter += 1
-                        st["physical_stock"] = 0  # Physical shelf emptied!
-                        # System stock remains frozen and positive!
-                    # Stretch: Check Misplaced Onset (low probability ~0.00025)
+                        st["physical_stock"] = 0  # Physical shelf emptied; system stock remains > 0!
                     elif st["system_stock"] >= 3 and np.random.rand() < 0.00025:
                         dur = int(np.random.uniform(5, 18))
                         st["active_episode"] = {
                             "episode_id": f"EP_{episode_id_counter:05d}",
                             "type": "misplaced",
                             "onset_day": day_idx,
-                            "end_day": min(n_days, day_idx + dur)
+                            "end_day": min(total_sim_days, day_idx + dur)
                         }
                         episode_id_counter += 1
-                        # Misplaced on adjacent bay: small trickle of sales (50-80% reduced availability)
                 
-                # C. Compute Expected & Realized Demand
+                # C. Confuser Status & Demand Modifiers
                 promo_lift = promo_dict.get((date_str, s_id, sku_id), 1.0)
                 is_on_promo = 1 if promo_lift > 1.0 else 0
                 
-                # Substitute boost: if sibling SKU has 0 physical stock in this store, boost this SKU
-                sub_sku = s_info["substitute_sku_id"]
-                sub_lift = 1.0
-                if sub_sku and sub_sku in empty_physical_by_store[s_id]:
-                    sub_lift = 1.35  # 35% category substitution lift
-                    
-                expected_lambda = s_info["base_demand_rate"] * t_mult * dow_factor * festive_factor * promo_lift * sub_lift
+                is_post_promo_lull = 1 if ((s_id, sku_id, day_idx) in promo_end_dates and not is_on_promo) else 0
+                is_demand_shock = 1 if (sku_id in demand_shock_skus and shock_start_day <= day_idx <= shock_end_day) else 0
                 
-                # Realized demand from Negative Binomial distribution for over-dispersion
-                # NegBin parameterization: mean = mu, var = mu + alpha * mu^2
+                # Demand multipliers for confusers
+                confuser_mult = 1.0
+                if is_demand_shock:
+                    confuser_mult *= 0.15  # 85% drop in demand
+                if is_post_promo_lull:
+                    confuser_mult *= 0.25  # 75% lull post-promo
+                    
+                sub_sku = s_info["substitute_sku_id"]
+                sub_lift = 1.35 if (sub_sku and sub_sku in empty_physical_by_store[s_id]) else 1.0
+                
+                expected_lambda = (
+                    s_info["base_demand_rate"]
+                    * t_mult
+                    * dow_factor
+                    * festive_factor
+                    * promo_lift
+                    * sub_lift
+                    * confuser_mult
+                )
+                
+                # Realized demand from Negative Binomial
                 if expected_lambda <= 0.001:
                     realized_demand = 0
                 else:
@@ -381,85 +399,88 @@ def generate_synthetic_data(
                     n_nb = (expected_lambda ** 2) / (var - expected_lambda)
                     realized_demand = int(np.random.negative_binomial(max(0.1, n_nb), min(0.999, p_nb)))
                 
-                # D. Realize Sales and Decrement Stock
+                # D. Realize Sales
                 current_ep = st["active_episode"]
                 if current_ep and current_ep["type"] == "phantom":
-                    # Shelf empty: 0 sales possible
                     sales = 0
                 elif current_ep and current_ep["type"] == "delisted":
                     sales = 0
                 elif current_ep and current_ep["type"] == "misplaced":
-                    # Trickle sales only
                     trickle_stock = max(0, int(st["physical_stock"] * 0.2))
                     sales = min(trickle_stock, realized_demand if np.random.rand() < 0.25 else 0)
                     st["physical_stock"] = max(0, st["physical_stock"] - sales)
                     st["system_stock"] = max(0, st["system_stock"] - sales)
                 else:
-                    # Normal sales
                     sales = min(st["physical_stock"], realized_demand)
                     st["physical_stock"] = max(0, st["physical_stock"] - sales)
                     st["system_stock"] = max(0, st["system_stock"] - sales)
                     
-                # E. Replenishment Trigger Logic
-                # If system stock + in-flight orders <= reorder_point, place order!
+                # E. Replenishment Trigger
                 total_pipeline = st["system_stock"] + sum(q for _, q in st["pending_orders"])
                 if total_pipeline <= s_info["reorder_point"]:
                     arrival_day = day_idx + s_info["lead_time_days"]
                     st["pending_orders"].append((arrival_day, s_info["reorder_quantity"]))
                     
-                # F. Record POS & Inventory data (visible to detector)
-                pos_records.append({
-                    "date": date_str,
-                    "store_id": s_id,
-                    "sku_id": sku_id,
-                    "sales": sales,
-                    "system_stock": st["system_stock"],
-                    "on_promo": is_on_promo,
-                    "unit_price": s_info["unit_price_inr"],
-                    "gross_margin_pct": s_info["gross_margin_pct"],
-                })
-                
-                # G. Record Ground Truth (hidden, for evaluation only)
-                ep_type = current_ep["type"] if current_ep else "none"
-                is_phantom = 1 if ep_type == "phantom" else 0
-                is_misplaced = 1 if ep_type == "misplaced" else 0
-                is_delisted = 1 if ep_type == "delisted" else 0
-                is_true_stockout = 1 if (st["physical_stock"] == 0 and st["system_stock"] == 0) else 0
-                ep_id = current_ep["episode_id"] if current_ep else None
-                days_since_onset = (day_idx - current_ep["onset_day"]) if current_ep else -1
-                
-                ground_truth_records.append({
-                    "date": date_str,
-                    "store_id": s_id,
-                    "sku_id": sku_id,
-                    "is_phantom": is_phantom,
-                    "is_misplaced": is_misplaced,
-                    "is_delisted": is_delisted,
-                    "is_true_stockout": is_true_stockout,
-                    "physical_stock": st["physical_stock"],
-                    "episode_id": ep_id,
-                    "days_since_onset": days_since_onset,
-                    "unfulfilled_demand": max(0, realized_demand - sales)
-                })
+                # F. Filter Out Burn-In Period (Days 0 to burn_in_days - 1)
+                if day_idx >= burn_in_days:
+                    pos_records.append({
+                        "date": date_str,
+                        "store_id": s_id,
+                        "sku_id": sku_id,
+                        "sales": sales,
+                        "system_stock": st["system_stock"],
+                        "on_promo": is_on_promo,
+                        "unit_price": s_info["unit_price_inr"],
+                        "gross_margin_pct": s_info["gross_margin_pct"],
+                    })
+                    
+                    ep_type = current_ep["type"] if current_ep else "none"
+                    is_phantom = 1 if ep_type == "phantom" else 0
+                    is_misplaced = 1 if ep_type == "misplaced" else 0
+                    is_delisted = 1 if ep_type == "delisted" else 0
+                    is_true_so = 1 if (st["physical_stock"] == 0 and st["system_stock"] == 0) else 0
+                    is_slow_zero = 1 if (sales == 0 and st["system_stock"] > 0 and not is_phantom and not is_misplaced and not is_delisted and not is_demand_shock and not is_post_promo_lull) else 0
+                    ep_id = current_ep["episode_id"] if current_ep else None
+                    days_since_onset = (day_idx - current_ep["onset_day"]) if current_ep else -1
+                    
+                    ground_truth_records.append({
+                        "date": date_str,
+                        "store_id": s_id,
+                        "sku_id": sku_id,
+                        "is_phantom": is_phantom,
+                        "is_misplaced": is_misplaced,
+                        "is_delisted": is_delisted,
+                        "is_true_stockout": is_true_so,
+                        "is_demand_shock": is_demand_shock,
+                        "is_post_promo_lull": is_post_promo_lull,
+                        "is_slow_mover_zero": is_slow_zero,
+                        "physical_stock": st["physical_stock"],
+                        "episode_id": ep_id,
+                        "days_since_onset": days_since_onset,
+                        "unfulfilled_demand": max(0, realized_demand - sales)
+                    })
+
 
     # Close any ongoing episodes at simulation end
+    min_saved_date = sim_date_list[burn_in_days].strftime("%Y-%m-%d")
     for s_id in df_store["store_id"]:
         for sku_id in df_sku["sku_id"]:
             ep = state[s_id][sku_id]["active_episode"]
-            if ep:
+            if ep and ep["end_day"] >= burn_in_days:
                 episode_records.append({
                     "episode_id": ep["episode_id"],
                     "store_id": s_id,
                     "sku_id": sku_id,
-                    "onset_date": date_list[ep["onset_day"]].strftime("%Y-%m-%d"),
-                    "end_date": date_list[-1].strftime("%Y-%m-%d"),
-                    "duration_days": n_days - ep["onset_day"],
+                    "onset_date": sim_date_list[ep["onset_day"]].strftime("%Y-%m-%d"),
+                    "end_date": sim_date_list[-1].strftime("%Y-%m-%d"),
+                    "duration_days": total_sim_days - ep["onset_day"],
                     "failure_type": ep["type"]
                 })
 
     df_pos = pd.DataFrame(pos_records)
     df_truth = pd.DataFrame(ground_truth_records)
     df_episodes = pd.DataFrame(episode_records).drop_duplicates(subset=["episode_id"])
+    df_promo = df_promo_all[df_promo_all["date"] >= min_saved_date].copy()
     
     # ---------------------------------------------------------
     # 5. SAVE ARTIFACTS
