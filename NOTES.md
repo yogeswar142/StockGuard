@@ -17,14 +17,29 @@
    - Ranking criterion: Expected Value of a Check $= P(\text{phantom}) \times \text{Daily Margin at Risk} \times \text{Expected Days Saved} - \text{Audit Cost}$.
    - Output hard cap: Exactly top 20 alerts per store per day.
 3. **Synthetic Dataset Structure:**
-   - Dimensions: 800 SKUs × 25 stores × 18 months daily data (~1.1M records or optimized representation).
+   - Dimensions: MVP (10 stores x 150 SKUs x 6 months) -> Scaled (25 stores x 800 SKUs x 18 months).
    - Fast / medium / slow mover velocity mix (realistic long tail: ~60% slow, 30% medium, 10% fast).
    - Seasonality, day-of-week effects, promo calendar, and Indian festive peaks (Diwali, etc.).
-   - Injected ground truth: ~3% phantom stock-out episodes (shelf empty, system stock > 0, sales frozen).
-   - Real-world confusers: true stock-outs (system stock = 0), natural zero sales runs on slow movers, post-promo demand lulls, and regional holiday dips.
-   - Stretch cases: misplaced inventory (slow trickle / adjacent bay) and delisted/discontinued lines.
+   - Prior & Hazard Conversion:
+     - 3% prevalence represents active state share $P \approx 0.03$.
+     - By steady-state kinetics ($P \approx \lambda_{\text{onset}} \times \bar{D}$), with mean undetected duration $\bar{D} = 21$ days (cycle count interval), the daily onset hazard rate is $\lambda_{\text{onset}} = 0.03 / 21 \approx 0.001429$ per SKU-store-day (~1 episode per 700 SKU-store-days).
+     - Episode duration modeled with mean 21 days (unless resolved earlier by audit/replenishment).
+   - Injected ground truth: phantom episodes with known onset, plus misplaced and delisted cases.
+   - Real-world confusers: true stock-outs (system stock = 0), natural slow-mover zero runs, post-promo demand lulls.
    - Ground truth labels stored separately from POS input data.
-4. **Tooling & Tech Stack:**
+4. **Leakage Prevention & Calibration Split:**
+   - Detector strictly does not access ground_truth_labels.
+   - Calibration/tuning on first ~60% of timeline; final evaluation on remaining ~40%.
+5. **Cooldown & Audit Simulation:**
+   - Once a SKU is alerted and audited in the simulation:
+     - If true phantom: physical stock corrected to system stock or system stock corrected to 0, triggering reorder.
+     - If false positive (stock found): alert enters cooldown for $N_{\text{cooldown}} = 7$ days to prevent list starvation.
+6. **Evaluation Metrics:**
+   - Raw Precision@20.
+   - Normalized Precision@20: $\text{raw\_p@20} / \min(20, \text{active phantoms that day})$.
+   - Episode-level Recall within $K$ days: $K \in \{3, 7, 14\}$ days from onset.
+   - Time-to-detect (mean days from onset to first alert).
+7. **Tooling & Tech Stack:**
    - Python, pandas, numpy, scipy, statsmodels/scikit-learn (lightweight), Streamlit, plotly/matplotlib.
    - No heavy uninterpretable deep learning. Every alert must have an English reason and visual proof.
 
