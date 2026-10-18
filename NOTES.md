@@ -90,9 +90,10 @@
       - Technical wording (Bayesian, Poisson, EV) completely removed from Manager View.
       - "Download today's checklist" button (CSV and printable clipboard view).
       - Pre-selected demo video shortcut (Store 02, 2026-01-20, SKU_133 Mosquito Repellent).
-    - Executive Benchmarking & ROI Simulator moved to Tab 2: "Performance and ROI".
-    - Methodology, theory, citations, and 5-scenario robustness grid moved to Tab 3: "Methodology and Grounding".
-    - Automated Testing: Added `tests/test_dashboard.py` leveraging `streamlit.testing.v1.AppTest`, verifying manager view, checklist progress, download buttons, and audit outcomes. Full test suite: 11/11 passed in 6.6s.
+    - Executive Benchmarking & ROI Simulator moved to dedicated page: `pages/1_📊_Performance_and_ROI.py`.
+    - Methodology, theory, citations, and 5-scenario robustness grid moved to dedicated page: `pages/2_🔬_Methodology_and_Research.py`.
+    - Main Portal (`app.py`): Pure SaaS Store Operations Hub designed from the shopkeeper / store manager perspective. Real-world inventory language, zero developer jargon, actionable floor walk instructions, and automated purchase order triggers.
+    - Automated Testing: `tests/test_dashboard.py` extended to cover all 3 pages (`app.py`, `Performance_and_ROI.py`, `Methodology_and_Research.py`). Full test suite: 13/13 passed in 4.9s.
 
 
 
