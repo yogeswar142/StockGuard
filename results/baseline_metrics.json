@@ -1,0 +1,90 @@
+{
+  "baseline_a_fixed_5d": {
+    "model": "Fixed_5_Days_Rule",
+    "eval_start_date": "2026-01-20",
+    "total_alerts": 14562,
+    "total_true_positives": 469,
+    "raw_precision_at_20": 0.0322,
+    "norm_precision_at_20": 0.051,
+    "total_eval_episodes": 474,
+    "episodes_caught": 469,
+    "episode_recall_overall": 0.9895,
+    "episode_recall_3d": 0.3734,
+    "episode_recall_7d": 0.9283,
+    "episode_recall_14d": 0.9367,
+    "mean_time_to_detect_days": 4.9,
+    "velocity_precision": {
+      "Fast": {
+        "alerts": 54,
+        "true_positives": 43,
+        "precision": 0.7963
+      },
+      "Medium": {
+        "alerts": 803,
+        "true_positives": 154,
+        "precision": 0.1918
+      },
+      "Slow": {
+        "alerts": 13705,
+        "true_positives": 272,
+        "precision": 0.0198
+      }
+    },
+    "fp_breakdown": {
+      "total_false_positives": 14093,
+      "slow_mover_zeros": 12210,
+      "slow_mover_share_pct": 86.6,
+      "demand_shocks": 0,
+      "demand_shock_share_pct": 0.0,
+      "post_promo_lulls": 1033,
+      "post_promo_share_pct": 7.3,
+      "misplaced_items": 84,
+      "misplaced_share_pct": 0.6,
+      "other_noise": 766
+    }
+  },
+  "baseline_b_streak_len": {
+    "model": "Streak_Length_Ranking",
+    "eval_start_date": "2026-01-20",
+    "total_alerts": 32683,
+    "total_true_positives": 462,
+    "raw_precision_at_20": 0.0141,
+    "norm_precision_at_20": 0.0509,
+    "total_eval_episodes": 474,
+    "episodes_caught": 462,
+    "episode_recall_overall": 0.9747,
+    "episode_recall_3d": 0.5359,
+    "episode_recall_7d": 0.9135,
+    "episode_recall_14d": 0.9219,
+    "mean_time_to_detect_days": 4.44,
+    "velocity_precision": {
+      "Fast": {
+        "alerts": 954,
+        "true_positives": 43,
+        "precision": 0.0451
+      },
+      "Medium": {
+        "alerts": 8553,
+        "true_positives": 150,
+        "precision": 0.0175
+      },
+      "Slow": {
+        "alerts": 23176,
+        "true_positives": 269,
+        "precision": 0.0116
+      }
+    },
+    "fp_breakdown": {
+      "total_false_positives": 32221,
+      "slow_mover_zeros": 29261,
+      "slow_mover_share_pct": 90.8,
+      "demand_shocks": 0,
+      "demand_shock_share_pct": 0.0,
+      "post_promo_lulls": 2090,
+      "post_promo_share_pct": 6.5,
+      "misplaced_items": 103,
+      "misplaced_share_pct": 0.3,
+      "other_noise": 767
+    }
+  }
+}
